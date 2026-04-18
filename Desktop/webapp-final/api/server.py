@@ -115,11 +115,11 @@ def me():
     try:
         sh = sheets._get_sheet()
         ws = sh.worksheet("Accounts")
-        records = ws.get_all_records()
+       records = sheets._rows_to_dicts(ws, sheets.ACCOUNT_HEADERS)
         for r in records:
             if str(r.get("TG_ID", "")).strip() == str(request.tg_id):
                 return jsonify({
-                    "ID": str(r.get("ID", "")),
+                    "ID": "",
                     "TG_ID": str(r.get("TG_ID", "")),
                     "Username": r.get("Username", ""),
                     "Full_Name": r.get("Full_Name", ""),
@@ -154,10 +154,7 @@ def categories():
 def get_transactions():
     sheets = _sheets()
     try:
-        sh = sheets._get_sheet()
-        ws = sh.worksheet("Transactions")
-        records = ws.get_all_records()
-        # Return newest first
+        records = sheets.get_all_transactions()
         return jsonify(list(reversed(records)))
     except Exception as e:
         logger.error("get_transactions error: %s", e)
