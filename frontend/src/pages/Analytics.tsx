@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useAppContext } from '../contexts/AppContext';
+import { formatCompact, formatFull } from '../lib/formatters';
 
 function parseDate(str: string): Date | null {
   if (!str) return null;
@@ -8,292 +9,265 @@ function parseDate(str: string): Date | null {
   return new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
 }
 
+function getMonthKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthLabel(key: string): string {
+  const [y, m] = key.split('-');
+  const months = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+  return `${months[parseInt(m) - 1]} ${y}`;
+}
+
 export function Analytics() {
   const { transactions } = useAppContext();
-  const [targetDate, setTargetDate] = useState('');
-  const [view, setView] = useState<'overview' | 'daily' | 'balance'>('overview');
 
-  const realTxs = transactions.filter(t => t.Type !== 'draft');
+  const now = new Date();
+  const currentMonthKey = getMonthKey(now);
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey);
 
-  // Balance as of target date
-  const balanceAtDate = useMemo(() => {
-    if (!targetDate) return null;
-    const [y, m, d] = targetDate.split('-');
-    const target = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+  const realTxs = useMemo(() =>
+    transactions.filter(t => t.Type !== 'draft'),
+    [transactions]
+  );
 
-    let income = 0, expense = 0, incomeUSD = 0, expenseUSD = 0;
+  // All available months sorted desc
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
     realTxs.forEach(t => {
-      const date = parseDate(t.Date);
-      if (!date || date > target) return;
+      const d = parseDate(t.Date);
+      if (d) set.add(getMonthKey(d));
+    });
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [realTxs]);
+
+  // Filtered transactions for selected period
+  const periodTxs = useMemo(() => {
+    if (selectedMonth === 'all') return realTxs;
+    return realTxs.filter(t => {
+      const d = parseDate(t.Date);
+      return d && getMonthKey(d) === selectedMonth;
+    });
+  }, [realTxs, selectedMonth]);
+
+  // Main stats
+  const stats = useMemo(() => {
+    let income = 0, expense = 0, incomeUSD = 0, expenseUSD = 0;
+    const incomeByCategory: Record<string, number> = {};
+    const expenseByCategory: Record<string, number> = {};
+
+    periodTxs.forEach(t => {
       const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
       const usd = parseFloat(String(t.Amount_USD ?? 0)) || 0;
-      if (t.Type === 'income') { income += uzs; incomeUSD += usd; }
-      else { expense += uzs; expenseUSD += usd; }
-    });
-    return { income, expense, net: income - expense, incomeUSD, expenseUSD };
-  }, [targetDate, realTxs]);
-
-  // Daily breakdown — last 30 days
-  const dailyData = useMemo(() => {
-    const map: Record<string, { income: number; expense: number; count: number }> = {};
-    realTxs.forEach(t => {
-      if (!t.Date) return;
-      if (!map[t.Date]) map[t.Date] = { income: 0, expense: 0, count: 0 };
-      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
-      if (t.Type === 'income') map[t.Date].income += uzs;
-      else map[t.Date].expense += uzs;
-      map[t.Date].count++;
-    });
-
-    return Object.entries(map)
-      .map(([date, v]) => ({ date, ...v, net: v.income - v.expense }))
-      .sort((a, b) => {
-        const da = parseDate(a.date)?.getTime() || 0;
-        const db = parseDate(b.date)?.getTime() || 0;
-        return db - da;
-      })
-      .slice(0, 30);
-  }, [realTxs]);
-
-  // Running balance over time
-  const runningBalance = useMemo(() => {
-    const sorted = [...realTxs].sort((a, b) => {
-      const da = parseDate(a.Date)?.getTime() || 0;
-      const db = parseDate(b.Date)?.getTime() || 0;
-      return da - db;
-    });
-
-    let balance = 0;
-    const points: { date: string; balance: number }[] = [];
-    const seen = new Set<string>();
-
-    sorted.forEach(t => {
-      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
-      balance += t.Type === 'income' ? uzs : -uzs;
-      if (!seen.has(t.Date)) {
-        seen.add(t.Date);
-        points.push({ date: t.Date, balance });
+      if (t.Type === 'income') {
+        income += uzs; incomeUSD += usd;
+        incomeByCategory[t.Category] = (incomeByCategory[t.Category] || 0) + uzs;
       } else {
-        if (points.length > 0) points[points.length - 1].balance = balance;
+        expense += uzs; expenseUSD += usd;
+        expenseByCategory[t.Category] = (expenseByCategory[t.Category] || 0) + uzs;
       }
     });
 
-    return points.slice(-30);
-  }, [realTxs]);
+    const topIncome = Object.entries(incomeByCategory).sort((a,b) => b[1]-a[1]).slice(0,5);
+    const topExpense = Object.entries(expenseByCategory).sort((a,b) => b[1]-a[1]).slice(0,5);
 
-  // Overview stats
-  const overview = useMemo(() => {
-    let totalIncome = 0, totalExpense = 0;
-    const categoryTotals: Record<string, number> = {};
-    realTxs.forEach(t => {
+    // Daily breakdown
+    const dailyMap: Record<string, { income: number; expense: number }> = {};
+    periodTxs.forEach(t => {
+      if (!t.Date) return;
+      if (!dailyMap[t.Date]) dailyMap[t.Date] = { income: 0, expense: 0 };
       const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
-      if (t.Type === 'income') totalIncome += uzs;
-      else {
-        totalExpense += uzs;
-        categoryTotals[t.Category] = (categoryTotals[t.Category] || 0) + uzs;
-      }
+      if (t.Type === 'income') dailyMap[t.Date].income += uzs;
+      else dailyMap[t.Date].expense += uzs;
     });
+    const daysCount = Object.keys(dailyMap).length || 1;
+    const avgDailyExpense = expense / daysCount;
+    const avgDailyIncome = income / daysCount;
 
-    const topExpenses = Object.entries(categoryTotals)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
+    return {
+      income, expense, incomeUSD, expenseUSD,
+      net: income - expense,
+      topIncome, topExpense,
+      avgDailyExpense, avgDailyIncome,
+      txCount: periodTxs.length,
+      incomeCount: periodTxs.filter(t => t.Type === 'income').length,
+      expenseCount: periodTxs.filter(t => t.Type === 'expense').length,
+    };
+  }, [periodTxs]);
 
-    const avgDailyExpense = totalExpense / Math.max(dailyData.length, 1);
+  // Month-over-month comparison (only when specific month selected)
+  const prevMonthStats = useMemo(() => {
+    if (selectedMonth === 'all') return null;
+    const [y, m] = selectedMonth.split('-').map(Number);
+    const prevDate = new Date(y, m - 2, 1);
+    const prevKey = getMonthKey(prevDate);
+    const prevTxs = realTxs.filter(t => {
+      const d = parseDate(t.Date);
+      return d && getMonthKey(d) === prevKey;
+    });
+    let income = 0, expense = 0;
+    prevTxs.forEach(t => {
+      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
+      if (t.Type === 'income') income += uzs;
+      else expense += uzs;
+    });
+    return { income, expense, net: income - expense };
+  }, [realTxs, selectedMonth]);
 
-    return { totalIncome, totalExpense, net: totalIncome - totalExpense, topExpenses, avgDailyExpense };
-  }, [realTxs, dailyData]);
-
-  const maxDaily = Math.max(...dailyData.map(d => Math.max(d.income, d.expense)), 1);
-  const minBalance = Math.min(...runningBalance.map(p => p.balance));
-  const maxBalance = Math.max(...runningBalance.map(p => p.balance));
-  const balanceRange = maxBalance - minBalance || 1;
+  function pct(curr: number, prev: number): string {
+    if (!prev) return '';
+    const diff = ((curr - prev) / prev) * 100;
+    return `${diff >= 0 ? '+' : ''}${diff.toFixed(0)}%`;
+  }
 
   return (
     <div className="space-y-5 pb-8">
       <h2 className="text-[24px] font-extrabold tracking-tight text-gray-900">Аналитика</h2>
 
-      {/* View switcher */}
-      <div className="flex gap-2">
-        {(['overview', 'daily', 'balance'] as const).map(v => (
-          <button key={v} onClick={() => setView(v)}
-            className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-colors ${
-              view === v ? 'bg-gray-900 text-white border-gray-900' : 'text-gray-500 border-gray-100 hover:bg-gray-50'
+      {/* Period selector */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-1 flex gap-1 overflow-x-auto">
+        {availableMonths.map(mk => (
+          <button key={mk} onClick={() => setSelectedMonth(mk)}
+            className={`flex-shrink-0 px-3 py-2 rounded-xl text-[11px] font-bold transition-colors ${
+              selectedMonth === mk ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-50'
             }`}>
-            {v === 'overview' ? 'Обзор' : v === 'daily' ? 'По дням' : 'Баланс'}
+            {monthLabel(mk)}
           </button>
         ))}
+        <button onClick={() => setSelectedMonth('all')}
+          className={`flex-shrink-0 px-3 py-2 rounded-xl text-[11px] font-bold transition-colors ${
+            selectedMonth === 'all' ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-50'
+          }`}>
+          Всё время
+        </button>
       </div>
 
-      {/* OVERVIEW */}
-      {view === 'overview' && (
-        <div className="space-y-4">
-          {/* Total stats */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-green-50 rounded-2xl p-4 border border-green-100">
-              <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mb-1">Всего доходов</p>
-              <p className="text-[20px] font-extrabold text-green-700">{(overview.totalIncome/1_000_000).toFixed(2)}M</p>
-              <p className="text-[10px] text-green-500 mt-1">сум</p>
-            </div>
-            <div className="bg-red-50 rounded-2xl p-4 border border-red-100">
-              <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest mb-1">Всего расходов</p>
-              <p className="text-[20px] font-extrabold text-red-700">{(overview.totalExpense/1_000_000).toFixed(2)}M</p>
-              <p className="text-[10px] text-red-400 mt-1">сум</p>
-            </div>
-          </div>
-
-          <div className={`rounded-2xl p-4 border ${overview.net >= 0 ? 'bg-gray-900' : 'bg-red-900'}`}>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Чистый баланс</p>
-            <p className={`text-[28px] font-extrabold ${overview.net >= 0 ? 'text-white' : 'text-red-300'}`}>
-              {overview.net >= 0 ? '+' : ''}{(overview.net/1_000_000).toFixed(2)}M
+      {/* Main KPI cards */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-green-50 rounded-2xl p-4 border border-green-100">
+          <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mb-1">Доход</p>
+          <p className="text-[22px] font-extrabold text-green-700">{formatCompact(stats.income)}</p>
+          <p className="text-[10px] text-green-500 mt-0.5">сум · {stats.incomeCount} опер.</p>
+          {prevMonthStats && stats.income > 0 && (
+            <p className={`text-[10px] font-bold mt-1 ${stats.income >= prevMonthStats.income ? 'text-green-600' : 'text-red-500'}`}>
+              {pct(stats.income, prevMonthStats.income)} vs пред. месяц
             </p>
-            <p className="text-[10px] text-gray-500 mt-1">{realTxs.length} операций всего</p>
-          </div>
-
-          {/* Avg daily expense */}
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Средний расход в день</p>
-            <p className="text-[22px] font-extrabold text-gray-900">{(overview.avgDailyExpense/1000).toFixed(0)}K</p>
-            <p className="text-[10px] text-gray-400">сум / день</p>
-          </div>
-
-          {/* Top expense categories */}
-          {overview.topExpenses.length > 0 && (
-            <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <h3 className="text-[12px] font-extrabold uppercase tracking-widest text-gray-900 mb-4">Топ расходов</h3>
-              <div className="space-y-3">
-                {overview.topExpenses.map(([cat, amt], i) => (
-                  <div key={cat}>
-                    <div className="flex justify-between items-center mb-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-extrabold text-gray-400">#{i+1}</span>
-                        <span className="text-[13px] font-bold text-gray-800">{cat}</span>
-                      </div>
-                      <span className="text-[13px] font-extrabold text-red-600">
-                        {(amt/1_000_000).toFixed(2)}M
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-100 rounded-full h-1.5">
-                      <div className="bg-red-400 h-1.5 rounded-full"
-                        style={{ width: `${(amt / overview.topExpenses[0][1]) * 100}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           )}
+        </div>
+        <div className="bg-red-50 rounded-2xl p-4 border border-red-100">
+          <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest mb-1">Расход</p>
+          <p className="text-[22px] font-extrabold text-red-700">{formatCompact(stats.expense)}</p>
+          <p className="text-[10px] text-red-400 mt-0.5">сум · {stats.expenseCount} опер.</p>
+          {prevMonthStats && stats.expense > 0 && (
+            <p className={`text-[10px] font-bold mt-1 ${stats.expense <= prevMonthStats.expense ? 'text-green-600' : 'text-red-500'}`}>
+              {pct(stats.expense, prevMonthStats.expense)} vs пред. месяц
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Net balance */}
+      <div className={`rounded-2xl p-4 border ${stats.net >= 0 ? 'bg-gray-900' : 'bg-red-900'}`}>
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Чистый баланс</p>
+        <p className={`text-[32px] font-extrabold ${stats.net >= 0 ? 'text-white' : 'text-red-300'}`}>
+          {stats.net >= 0 ? '+' : ''}{formatCompact(stats.net)}
+        </p>
+        <p className="text-[11px] text-gray-400 mt-1">{formatFull(stats.net)} сум · {stats.txCount} операций</p>
+        {prevMonthStats && (
+          <p className={`text-[10px] font-bold mt-1 ${stats.net >= prevMonthStats.net ? 'text-green-400' : 'text-red-400'}`}>
+            {pct(stats.net, prevMonthStats.net)} vs предыдущий месяц
+          </p>
+        )}
+      </div>
+
+      {/* Avg daily */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-2xl p-4 border border-gray-100">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Ср. доход / день</p>
+          <p className="text-[20px] font-extrabold text-gray-900">{formatCompact(stats.avgDailyIncome)}</p>
+          <p className="text-[10px] text-gray-400">сум</p>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-gray-100">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Ср. расход / день</p>
+          <p className="text-[20px] font-extrabold text-gray-900">{formatCompact(stats.avgDailyExpense)}</p>
+          <p className="text-[10px] text-gray-400">сум</p>
+        </div>
+      </div>
+
+      {/* USD summary if any */}
+      {(stats.incomeUSD > 0 || stats.expenseUSD > 0) && (
+        <div className="bg-white rounded-2xl p-4 border border-gray-100">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">В долларах</p>
+          <div className="flex gap-6">
+            {stats.incomeUSD > 0 && (
+              <div>
+                <p className="text-[10px] text-green-600 font-bold">Доход</p>
+                <p className="text-[18px] font-extrabold text-green-700">${formatCompact(stats.incomeUSD)}</p>
+              </div>
+            )}
+            {stats.expenseUSD > 0 && (
+              <div>
+                <p className="text-[10px] text-red-500 font-bold">Расход</p>
+                <p className="text-[18px] font-extrabold text-red-700">${formatCompact(stats.expenseUSD)}</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* DAILY VIEW */}
-      {view === 'daily' && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <h3 className="text-[12px] font-extrabold uppercase tracking-widest text-gray-900 mb-4">Последние 30 дней</h3>
-            <div className="flex items-end gap-1 h-32 mb-3">
-              {dailyData.slice().reverse().map(d => (
-                <div key={d.date} className="flex-1 flex flex-col items-center gap-0.5 h-full justify-end" title={`${d.date}: +${d.income.toLocaleString()} / -${d.expense.toLocaleString()}`}>
-                  {d.income > 0 && (
-                    <div className="w-full bg-green-400 rounded-sm"
-                      style={{ height: `${(d.income / maxDaily) * 100}%` }} />
-                  )}
-                  {d.expense > 0 && (
-                    <div className="w-full bg-red-400 rounded-sm"
-                      style={{ height: `${(d.expense / maxDaily) * 100}%` }} />
-                  )}
+      {/* Top income categories */}
+      {stats.topIncome.length > 0 && (
+        <div className="bg-white rounded-2xl p-4 border border-gray-100">
+          <h3 className="text-[12px] font-extrabold uppercase tracking-widest text-gray-900 mb-4">Топ доходов</h3>
+          <div className="space-y-3">
+            {stats.topIncome.map(([cat, amt], i) => (
+              <div key={cat}>
+                <div className="flex justify-between items-center mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-extrabold text-gray-400">#{i+1}</span>
+                    <span className="text-[13px] font-bold text-gray-800">{cat}</span>
+                  </div>
+                  <span className="text-[13px] font-extrabold text-green-600">{formatCompact(amt)}</span>
                 </div>
-              ))}
-            </div>
-            <div className="flex gap-3">
-              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-green-400 rounded-sm"/><span className="text-[10px] text-gray-500">Доход</span></div>
-              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-red-400 rounded-sm"/><span className="text-[10px] text-gray-500">Расход</span></div>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            {dailyData.map(d => (
-              <div key={d.date} className="bg-white rounded-2xl p-4 border border-gray-100">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-[13px] font-extrabold text-gray-900">{d.date}</span>
-                  <span className={`text-[13px] font-extrabold ${d.net >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {d.net >= 0 ? '+' : ''}{(d.net/1000).toFixed(0)}K
-                  </span>
+                <div className="w-full bg-gray-100 rounded-full h-1.5">
+                  <div className="bg-green-400 h-1.5 rounded-full"
+                    style={{ width: `${(amt / stats.topIncome[0][1]) * 100}%` }} />
                 </div>
-                <div className="flex gap-4">
-                  {d.income > 0 && <span className="text-[11px] text-green-600">+{(d.income/1000).toFixed(0)}K</span>}
-                  {d.expense > 0 && <span className="text-[11px] text-red-500">-{(d.expense/1000).toFixed(0)}K</span>}
-                  <span className="text-[11px] text-gray-400 ml-auto">{d.count} опер.</span>
-                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5">{formatFull(amt)} сум</p>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* BALANCE VIEW */}
-      {view === 'balance' && (
-        <div className="space-y-4">
-          {/* Target date balance */}
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <h3 className="text-[12px] font-extrabold uppercase tracking-widest text-gray-900 mb-3">Баланс на дату</h3>
-            <input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-[13px] outline-none focus:ring-1 focus:ring-gray-900 mb-4" />
-
-            {balanceAtDate ? (
-              <div className="space-y-3">
-                <div className={`rounded-xl p-4 ${balanceAtDate.net >= 0 ? 'bg-gray-900' : 'bg-red-900'}`}>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Баланс на {targetDate.split('-').reverse().join('.')}</p>
-                  <p className={`text-[28px] font-extrabold ${balanceAtDate.net >= 0 ? 'text-white' : 'text-red-300'}`}>
-                    {balanceAtDate.net >= 0 ? '+' : ''}{(balanceAtDate.net/1_000_000).toFixed(2)}M сум
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-green-50 rounded-xl p-3 border border-green-100">
-                    <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest">Доход</p>
-                    <p className="text-[16px] font-extrabold text-green-700">{(balanceAtDate.income/1_000_000).toFixed(2)}M</p>
-                    {balanceAtDate.incomeUSD > 0 && <p className="text-[10px] text-green-500">${balanceAtDate.incomeUSD.toLocaleString()}</p>}
+      {/* Top expense categories */}
+      {stats.topExpense.length > 0 && (
+        <div className="bg-white rounded-2xl p-4 border border-gray-100">
+          <h3 className="text-[12px] font-extrabold uppercase tracking-widest text-gray-900 mb-4">Топ расходов</h3>
+          <div className="space-y-3">
+            {stats.topExpense.map(([cat, amt], i) => (
+              <div key={cat}>
+                <div className="flex justify-between items-center mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-extrabold text-gray-400">#{i+1}</span>
+                    <span className="text-[13px] font-bold text-gray-800">{cat}</span>
                   </div>
-                  <div className="bg-red-50 rounded-xl p-3 border border-red-100">
-                    <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest">Расход</p>
-                    <p className="text-[16px] font-extrabold text-red-700">{(balanceAtDate.expense/1_000_000).toFixed(2)}M</p>
-                    {balanceAtDate.expenseUSD > 0 && <p className="text-[10px] text-red-400">${balanceAtDate.expenseUSD.toLocaleString()}</p>}
-                  </div>
+                  <span className="text-[13px] font-extrabold text-red-600">{formatCompact(amt)}</span>
                 </div>
+                <div className="w-full bg-gray-100 rounded-full h-1.5">
+                  <div className="bg-red-400 h-1.5 rounded-full"
+                    style={{ width: `${(amt / stats.topExpense[0][1]) * 100}%` }} />
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5">{formatFull(amt)} сум</p>
               </div>
-            ) : (
-              <p className="text-[12px] text-gray-400 text-center py-4">Выберите дату для просмотра баланса</p>
-            )}
+            ))}
           </div>
+        </div>
+      )}
 
-          {/* Running balance chart */}
-          {runningBalance.length > 0 && (
-            <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <h3 className="text-[12px] font-extrabold uppercase tracking-widest text-gray-900 mb-4">Динамика баланса</h3>
-              <div className="relative h-32">
-                <svg viewBox={`0 0 ${runningBalance.length * 10} 100`} className="w-full h-full" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={minBalance >= 0 ? '#22c55e' : '#ef4444'} stopOpacity="0.3"/>
-                      <stop offset="100%" stopColor={minBalance >= 0 ? '#22c55e' : '#ef4444'} stopOpacity="0"/>
-                    </linearGradient>
-                  </defs>
-                  <polyline
-                    points={runningBalance.map((p, i) => `${i * 10 + 5},${100 - ((p.balance - minBalance) / balanceRange) * 90}`).join(' ')}
-                    fill="none"
-                    stroke={minBalance >= 0 ? '#22c55e' : '#ef4444'}
-                    strokeWidth="2"
-                  />
-                </svg>
-              </div>
-              <div className="flex justify-between mt-2">
-                <span className="text-[10px] text-gray-400">{runningBalance[0]?.date}</span>
-                <span className="text-[10px] text-gray-400">{runningBalance[runningBalance.length-1]?.date}</span>
-              </div>
-              <div className="flex justify-between mt-1">
-                <span className="text-[10px] font-bold text-gray-500">Min: {(minBalance/1000).toFixed(0)}K</span>
-                <span className="text-[10px] font-bold text-gray-500">Max: {(maxBalance/1000).toFixed(0)}K</span>
-              </div>
-            </div>
-          )}
+      {periodTxs.length === 0 && (
+        <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-gray-200">
+          <p className="text-[13px] font-bold text-gray-400 uppercase tracking-widest">Нет данных</p>
         </div>
       )}
     </div>

@@ -10,7 +10,6 @@ import { Balance } from '../../pages/Balance';
 import { Analytics } from '../../pages/Analytics';
 import { Home, FileBarChart, PlusCircle, CreditCard, LayoutDashboard, BarChart2 } from 'lucide-react';
 
-
 function Navbar() {
   const { currentUser } = useAppContext();
   const location = useLocation();
@@ -20,9 +19,9 @@ function Navbar() {
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'Add', path: '/add', icon: PlusCircle, roles: ['editor', 'finance_director'] },
     { name: 'Drafts', path: '/drafts', icon: Home, roles: ['editor', 'finance_director'] },
+    { name: 'Analytics', path: '/analytics', icon: BarChart2, roles: ['director', 'finance_director'] },
     { name: 'Reports', path: '/reports', icon: FileBarChart, roles: ['director', 'finance_director'] },
     { name: 'Balance', path: '/balance', icon: CreditCard },
-    { name: 'Analytics', path: '/analytics', icon: BarChart2, roles: ['director', 'finance_director'] },
   ];
 
   const visibleItems = navItems.filter(
@@ -31,7 +30,7 @@ function Navbar() {
 
   return (
     <nav className="fixed bottom-0 w-full bg-white border-t border-gray-100 pb-4 pt-2 px-2 z-50">
-      <div className="max-w-md mx-auto grid grid-cols-5 px-2 gap-1">
+      <div className="max-w-md mx-auto grid px-2 gap-1" style={{ gridTemplateColumns: `repeat(${visibleItems.length}, 1fr)` }}>
         {visibleItems.map(item => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path;
@@ -89,8 +88,8 @@ export function AppLayout() {
           <Route path="/drafts" element={<Drafts />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/balance" element={<Balance />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
       <Navbar />
