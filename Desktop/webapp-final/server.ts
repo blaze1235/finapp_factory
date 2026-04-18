@@ -101,11 +101,21 @@ app.post("/api/transactions", async (req, res) => {
     if (!tx.ID) {
       tx.ID = Math.random().toString(36).substr(2, 8).toUpperCase();
     }
-    await sheet.addRow([
-      tx.ID, tx.Timestamp, tx.Date, tx.Type, tx.Category,
-      tx.Amount_UZS, tx.Amount_USD ?? "", tx.USD_Rate ?? "",
-      tx.Note, tx.Editor_ID, tx.Editor_Name, tx.Currency ?? "UZS",
-    ]);
+    // google-spreadsheet v5 requires an object, not an array
+    await sheet.addRow({
+      ID: tx.ID,
+      Timestamp: tx.Timestamp ?? "",
+      Date: tx.Date ?? "",
+      Type: tx.Type ?? "",
+      Category: tx.Category ?? "",
+      Amount_UZS: tx.Amount_UZS ?? "",
+      Amount_USD: tx.Amount_USD ?? "",
+      USD_Rate: tx.USD_Rate ?? "",
+      Note: tx.Note ?? "",
+      Editor_ID: tx.Editor_ID ?? "",
+      Editor_Name: tx.Editor_Name ?? "",
+      Currency: tx.Currency ?? "UZS",
+    });
     res.json(tx);
   } catch (err: any) {
     console.error("/api/transactions POST error:", err.message);
