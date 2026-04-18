@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../contexts/AppContext';
 import { formatCurrency } from '../lib/formatters';
 import { Trash2 } from 'lucide-react';
@@ -34,11 +34,11 @@ export function Dashboard() {
         <h2 className="text-[28px] font-extrabold tracking-tight leading-tight text-gray-900">
           Добрый день,
           <br className="sm:hidden" />
-          <span className="sm:ml-2 text-gray-500">{currentUser?.Full_Name.split(' ')[0]}!</span>
+          <span className="sm:ml-2 text-gray-500">{currentUser?.Full_Name?.split(' ')[0]}!</span>
         </h2>
         <div className="mt-4 flex gap-2">
           <span className="text-[10px] font-bold bg-green-100 text-green-800 px-2.5 py-1 rounded-md uppercase tracking-widest">
-            {currentUser?.Role.replace('_', ' ')}
+          {currentUser?.Role?.replace('_', ' ')}
           </span>
           <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2.5 py-1 rounded-md uppercase tracking-widest">
             {currentUser?.TG_ID && `TG: ${currentUser.TG_ID}`}

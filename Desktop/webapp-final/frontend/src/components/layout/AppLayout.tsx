@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../contexts/AppContext';
 import { LoginScreen } from '../../pages/LoginScreen';
 import { Dashboard } from '../../pages/Dashboard';
@@ -7,7 +7,9 @@ import { AddTransaction } from '../../pages/AddTransaction';
 import { Drafts } from '../../pages/Drafts';
 import { Reports } from '../../pages/Reports';
 import { Balance } from '../../pages/Balance';
-import { Home, FileBarChart, PlusCircle, CreditCard, LayoutDashboard } from 'lucide-react';
+import { Analytics } from '../../pages/Analytics';
+import { Home, FileBarChart, PlusCircle, CreditCard, LayoutDashboard, BarChart2 } from 'lucide-react';
+
 
 function Navbar() {
   const { currentUser } = useAppContext();
@@ -20,6 +22,7 @@ function Navbar() {
     { name: 'Drafts', path: '/drafts', icon: Home, roles: ['editor', 'finance_director'] },
     { name: 'Reports', path: '/reports', icon: FileBarChart, roles: ['director', 'finance_director'] },
     { name: 'Balance', path: '/balance', icon: CreditCard },
+    { name: 'Analytics', path: '/analytics', icon: BarChart2, roles: ['director', 'finance_director'] },
   ];
 
   const visibleItems = navItems.filter(
@@ -73,9 +76,9 @@ export function AppLayout() {
         <div className="flex items-center gap-3">
           <button onClick={refreshData} className="text-[11px] hover:bg-[#EEEEEE] text-gray-500 uppercase tracking-wider py-1 px-3 rounded font-bold border border-gray-100">↻</button>
           <span className="text-[11px] font-bold bg-gray-900 text-white px-2 py-1 rounded uppercase tracking-wider hidden sm:inline-block">
-            {currentUser.Role.replace('_', ' ')}
+            {currentUser.Role?.replace('_', ' ')}
           </span>
-          <span className="text-[15px] font-bold">{currentUser.Full_Name.split(' ')[0]}</span>
+          <span className="text-[15px] font-bold">{currentUser.Full_Name?.split(' ')?.[0]}</span>
           <button onClick={logout} className="text-[11px] hover:bg-[#EEEEEE] text-gray-500 uppercase tracking-wider py-1 px-3 rounded font-bold border border-gray-100">Выйти</button>
         </div>
       </header>
@@ -87,6 +90,7 @@ export function AppLayout() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/balance" element={<Balance />} />
           <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/analytics" element={<Analytics />} />
         </Routes>
       </main>
       <Navbar />
