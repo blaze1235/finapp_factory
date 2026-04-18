@@ -113,13 +113,11 @@ def me():
     """Return current user info from Accounts sheet."""
     sheets = _sheets()
     try:
-        sh = sheets._get_sheet()
-        ws = sh.worksheet("Accounts")
-       records = sheets._rows_to_dicts(ws, sheets.ACCOUNT_HEADERS)
+        ws = sheets._get_sheet().worksheet("Accounts")
+        records = sheets._rows_to_dicts(ws, sheets.ACCOUNT_HEADERS)
         for r in records:
             if str(r.get("TG_ID", "")).strip() == str(request.tg_id):
                 return jsonify({
-                    "ID": "",
                     "TG_ID": str(r.get("TG_ID", "")),
                     "Username": r.get("Username", ""),
                     "Full_Name": r.get("Full_Name", ""),
