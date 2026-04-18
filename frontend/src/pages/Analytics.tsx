@@ -25,8 +25,8 @@ export function Analytics() {
     realTxs.forEach(t => {
       const date = parseDate(t.Date);
       if (!date || date > target) return;
-      const uzs = parseFloat(t.Amount_UZS || '0') || 0;
-      const usd = parseFloat(t.Amount_USD || '0') || 0;
+      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
+      const usd = parseFloat(String(t.Amount_USD ?? 0)) || 0;
       if (t.Type === 'income') { income += uzs; incomeUSD += usd; }
       else { expense += uzs; expenseUSD += usd; }
     });
@@ -39,7 +39,7 @@ export function Analytics() {
     realTxs.forEach(t => {
       if (!t.Date) return;
       if (!map[t.Date]) map[t.Date] = { income: 0, expense: 0, count: 0 };
-      const uzs = parseFloat(t.Amount_UZS || '0') || 0;
+      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
       if (t.Type === 'income') map[t.Date].income += uzs;
       else map[t.Date].expense += uzs;
       map[t.Date].count++;
@@ -68,7 +68,7 @@ export function Analytics() {
     const seen = new Set<string>();
 
     sorted.forEach(t => {
-      const uzs = parseFloat(t.Amount_UZS || '0') || 0;
+      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
       balance += t.Type === 'income' ? uzs : -uzs;
       if (!seen.has(t.Date)) {
         seen.add(t.Date);
@@ -86,7 +86,7 @@ export function Analytics() {
     let totalIncome = 0, totalExpense = 0;
     const categoryTotals: Record<string, number> = {};
     realTxs.forEach(t => {
-      const uzs = parseFloat(t.Amount_UZS || '0') || 0;
+      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
       if (t.Type === 'income') totalIncome += uzs;
       else {
         totalExpense += uzs;

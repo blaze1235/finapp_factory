@@ -91,7 +91,7 @@ export function Reports() {
         t.Note?.toLowerCase().includes(q) ||
         t.Category?.toLowerCase().includes(q) ||
         t.Editor_Name?.toLowerCase().includes(q) ||
-        t.Amount_UZS?.includes(q)
+        String(t.Amount_UZS ?? "").includes(q)
       );
     }
 
@@ -102,8 +102,8 @@ export function Reports() {
         const db = parseDate(b.Date)?.getTime() || 0;
         return sortDir === 'desc' ? db - da : da - db;
       } else {
-        const aa = parseFloat(a.Amount_UZS || '0');
-        const bb = parseFloat(b.Amount_UZS || '0');
+        const aa = parseFloat(String(a.Amount_UZS ?? 0));
+        const bb = parseFloat(String(b.Amount_UZS ?? 0));
         return sortDir === 'desc' ? bb - aa : aa - bb;
       }
     });
@@ -115,8 +115,8 @@ export function Reports() {
     let income = 0, expense = 0;
     let incomeUSD = 0, expenseUSD = 0;
     filtered.forEach(t => {
-      const uzs = parseFloat(t.Amount_UZS || '0') || 0;
-      const usd = parseFloat(t.Amount_USD || '0') || 0;
+      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
+      const usd = parseFloat(String(t.Amount_USD ?? 0)) || 0;
       if (t.Type === 'income') { income += uzs; incomeUSD += usd; }
       else { expense += uzs; expenseUSD += usd; }
     });
@@ -128,7 +128,7 @@ export function Reports() {
     const map: Record<string, { income: number; expense: number; count: number }> = {};
     filtered.forEach(t => {
       if (!map[t.Category]) map[t.Category] = { income: 0, expense: 0, count: 0 };
-      const uzs = parseFloat(t.Amount_UZS || '0') || 0;
+      const uzs = parseFloat(String(t.Amount_UZS ?? 0)) || 0;
       if (t.Type === 'income') map[t.Category].income += uzs;
       else map[t.Category].expense += uzs;
       map[t.Category].count++;
@@ -341,8 +341,8 @@ export function Reports() {
                   <span className={`text-[14px] font-extrabold ${tx.Type === 'income' ? 'text-green-600' : 'text-gray-900'}`}>
                     {tx.Type === 'income' ? '+' : '-'}
                     {tx.Currency === 'USD'
-                      ? `$${parseFloat(tx.Amount_USD || '0').toLocaleString()}`
-                      : `${parseFloat(tx.Amount_UZS || '0').toLocaleString()} сум`}
+                      ? `$${parseFloat(String(tx.Amount_USD ?? 0)).toLocaleString()}`
+                      : `${parseFloat(String(tx.Amount_UZS ?? 0)).toLocaleString()} сум`}
                   </span>
                 </div>
                 {tx.Note && <p className="text-[12px] text-gray-500 mt-1.5 ml-4">{tx.Note}</p>}
