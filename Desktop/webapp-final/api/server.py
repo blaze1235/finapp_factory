@@ -35,12 +35,15 @@ def _sheets():
 
 def _verify_telegram_init_data(init_data: str) -> dict | None:
     """Validate Telegram WebApp initData HMAC and return parsed user dict."""
+    from urllib.parse import unquote
     bot_token = os.environ.get("BOT_TOKEN", "")
     try:
         pairs = {}
         hash_val = None
         for part in init_data.split("&"):
             k, _, v = part.partition("=")
+            k = unquote(k)
+            v = unquote(v)
             if k == "hash":
                 hash_val = v
             else:
@@ -51,6 +54,7 @@ def _verify_telegram_init_data(init_data: str) -> dict | None:
         secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
         computed = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(computed, hash_val):
+            logger.warning("HMAC mismatch. computed=%s hash=%s", computed, hash_val)
             return None
         if "user" in pairs:
             return json.loads(pairs["user"])
