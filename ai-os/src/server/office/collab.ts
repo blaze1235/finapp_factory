@@ -1,10 +1,18 @@
 import { sql } from "@/server/db";
-import { departments, workers, type DeptKey } from "./registry";
+import { departments, workers, type DeptKey, type Worker } from "./registry";
 import { PORTFOLIO_CONTEXT } from "./context";
 import { generate, generateJson } from "./llm";
 import { beginCollab, endCollab } from "./simEngine";
+import { snapshot as blazerentSnapshot } from "@/server/datasources/blazerent";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Real live-data grounding for a worker, if their department has a connected source. No-op until configured. */
+async function liveDataFor(w: Worker): Promise<string> {
+  if (w.dept !== "blazerent") return "";
+  const data = await blazerentSnapshot();
+  return data ? `\n\n${data}` : "";
+}
 
 const CHAT_STYLE =
   "This is a live office chat, not a report. Reply as yourself in 40-140 words, conversational but substantive. React to what others said (agree, push back, add numbers). No headings, no sign-offs. Plain text or light markdown (bold, short lists) only.";
@@ -65,7 +73,7 @@ export async function runDeptReply(chatId: string): Promise<void> {
     }
 
     const reply = await generate(
-      `${speaker.persona}\n${PORTFOLIO_CONTEXT}\nYou are chatting in the "${chat.title}" channel of the ${dept.name} room. ${CHAT_STYLE}`,
+      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}\nYou are chatting in the "${chat.title}" channel of the ${dept.name} room. ${CHAT_STYLE}`,
       `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
     );
     await addMessage(chatId, speaker.key, reply);
@@ -86,7 +94,7 @@ export async function runDmReply(chatId: string): Promise<void> {
                             WHERE chat_id = ${chatId} ORDER BY id DESC LIMIT 24`).reverse() as unknown as MsgRow[];
 
     const reply = await generate(
-      `${speaker.persona}\n${PORTFOLIO_CONTEXT}\n${DM_STYLE}`,
+      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}\n${DM_STYLE}`,
       `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
     );
     await addMessage(chatId, speaker.key, reply);
@@ -129,7 +137,7 @@ export async function runOfficeCollab(chatId: string): Promise<void> {
       for (const p of picked) {
         const w = workers[p.worker];
         const text = await generate(
-          `${w.persona}\n${PORTFOLIO_CONTEXT}\nYou were pulled into the all-hands office chat to discuss the boss's idea. Your angle: ${p.angle}. Be honest — if numbers don't work, say so with estimates; if the market signal is good, back it with reasoning. ${CHAT_STYLE}`,
+          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}\nYou were pulled into the all-hands office chat to discuss the boss's idea. Your angle: ${p.angle}. Be honest — if numbers don't work, say so with estimates; if the market signal is good, back it with reasoning. ${CHAT_STYLE}`,
           `Discussion so far:\n\n${transcript(running)}\n\nSpeak now as ${w.name}.`,
         );
         await addMessage(chatId, w.key, text);

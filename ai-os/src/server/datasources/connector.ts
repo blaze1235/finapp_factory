@@ -31,12 +31,17 @@ export function isConfigured(source: SourceKey): boolean {
   return !!process.env[ENV_VAR[source]];
 }
 
+/** SQLAlchemy-style URLs (postgresql+asyncpg://…) use a driver suffix the `postgres` package doesn't understand. */
+function normalizeUrl(url: string): string {
+  return url.replace(/^postgres(ql)?\+\w+:\/\//, "postgresql://");
+}
+
 function client(source: SourceKey) {
   const p = pool();
   if (!p[source]) {
     const url = process.env[ENV_VAR[source]];
     if (!url) throw new Error(`${ENV_VAR[source]} is not set`);
-    p[source] = postgres(url, { max: 2, idle_timeout: 20, connect_timeout: 5, onnotice: () => {} });
+    p[source] = postgres(normalizeUrl(url), { max: 2, idle_timeout: 20, connect_timeout: 5, onnotice: () => {} });
   }
   return p[source]!;
 }
@@ -50,7 +55,7 @@ const WRITE_KEYWORDS = /\b(insert|update|delete|drop|alter|truncate|grant|revoke
 export async function readonlyQuery(source: SourceKey, query: string, limit = 200) {
   if (!isConfigured(source)) throw new Error(`${source} is not connected yet — no ${ENV_VAR[source]} set`);
   const trimmed = query.trim().replace(/;+\s*$/, "");
-  if (!/^select\b/i.test(trimmed)) throw new Error("Only SELECT queries are allowed");
+  if (!/^(select|with)\b/i.test(trimmed)) throw new Error("Only SELECT (or WITH ... SELECT) queries are allowed");
   if (WRITE_KEYWORDS.test(trimmed)) throw new Error("Query contains a disallowed keyword");
   const capped = /\blimit\b/i.test(trimmed) ? trimmed : `${trimmed} LIMIT ${Math.min(Math.max(limit, 1), 500)}`;
   return client(source).unsafe(capped);
