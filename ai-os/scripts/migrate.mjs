@@ -35,9 +35,44 @@ await sql`
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
 
+await sql`
+  CREATE TABLE IF NOT EXISTS chats (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL DEFAULT 'dept',
+    department TEXT,
+    title TEXT NOT NULL,
+    busy BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+
+await sql`
+  CREATE TABLE IF NOT EXISTS messages (
+    id BIGSERIAL PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    worker_key TEXT,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+
+await sql`
+  CREATE TABLE IF NOT EXISTS transactions (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    amount NUMERIC NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'UZS',
+    category TEXT NOT NULL DEFAULT 'other',
+    note TEXT,
+    occurred_on DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+
 await sql`CREATE INDEX IF NOT EXISTS idx_subtasks_task ON subtasks(task_id)`;
 await sql`CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id)`;
 await sql`CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC)`;
+await sql`CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id)`;
+await sql`CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(occurred_on DESC)`;
 
 console.log("✅ migrations applied");
 await sql.end();

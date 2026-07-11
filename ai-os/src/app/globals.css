@@ -35,6 +35,14 @@ body {
 }
 .anim-sway { animation: sway 2.4s ease-in-out infinite; }
 
+/* walking waddle */
+@keyframes waddle {
+  0% { transform: rotate(-5deg) translateY(0); }
+  50% { transform: rotate(0deg) translateY(-1.5px); }
+  100% { transform: rotate(5deg) translateY(0); }
+}
+.anim-waddle { animation: waddle 0.32s ease-in-out infinite alternate; }
+
 /* typing dots in bubble */
 @keyframes dots {
   0% { content: "·"; }

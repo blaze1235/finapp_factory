@@ -1,35 +1,104 @@
 import type { DeptKey } from "@/server/office/registry";
 
-// ── Isometric geometry ────────────────────────────────
-export const TW = 58; // tile width
-export const TH = 30; // tile height (2:1-ish iso)
-export const OX = 452; // screen origin x
-export const OY = 150; // screen origin y
-export const BOARD_W = 980;
-export const BOARD_H = 640;
+export const TILE = 20;
+export const COLS = 46;
+export const ROWS = 30;
+export const BOARD_W = COLS * TILE; // 920
+export const BOARD_H = ROWS * TILE; // 600
 
-/** Grid → screen. z is in pixels (height above the floor). */
-export function iso(gx: number, gy: number, z = 0): [number, number] {
-  return [OX + (gx - gy) * (TW / 2), OY + (gx + gy) * (TH / 2) - z];
-}
-
-/** Floor extent in tiles. */
-export const FLOOR = { gx0: 0, gy0: 0, gx1: 17, gy1: 13 };
-
-export interface Zone {
+export interface Room {
   dept: DeptKey;
-  gx0: number;
-  gy0: number;
-  gx1: number;
-  gy1: number;
-  /** desk anchor cells (person tile) */
-  slots: [number, number][];
+  x: number; // floor tiles
+  y: number;
+  w: number;
+  h: number;
+  side: "left" | "right";
+  /** desk anchor tiles (agent stands/sits at desk+1 row) */
+  desks: [number, number][];
+  /** door tile just inside / just outside the room */
+  doorIn: [number, number];
+  doorOut: [number, number];
 }
 
-// four team zones in a 2×2 grid with a cross-shaped walkway between them
-export const zones: Zone[] = [
-  { dept: "marketing", gx0: 1, gy0: 1, gx1: 7, gy1: 5, slots: [[2, 2], [5, 2], [2, 4], [5, 4]] },
-  { dept: "blazerent", gx0: 10, gy0: 1, gx1: 16, gy1: 5, slots: [[11, 2], [14, 2], [11, 4], [14, 4]] },
-  { dept: "finance", gx0: 1, gy0: 8, gx1: 7, gy1: 12, slots: [[2, 9], [5, 9], [2, 11], [5, 11]] },
-  { dept: "brain", gx0: 10, gy0: 8, gx1: 16, gy1: 12, slots: [[11, 9], [14, 9], [11, 11], [14, 11]] },
+function leftRoom(dept: DeptKey, y: number): Room {
+  return {
+    dept,
+    x: 1,
+    y,
+    w: 10,
+    h: 6,
+    side: "left",
+    desks: [
+      [2.6, y + 0.7],
+      [6.6, y + 0.7],
+      [2.6, y + 3.2],
+      [6.6, y + 3.2],
+    ],
+    doorIn: [9.5, y + 3],
+    doorOut: [12.5, y + 3],
+  };
+}
+
+function rightRoom(dept: DeptKey, y: number): Room {
+  return {
+    dept,
+    x: 35,
+    y,
+    w: 10,
+    h: 6,
+    side: "right",
+    desks: [
+      [36.6, y + 0.7],
+      [40.6, y + 0.7],
+      [36.6, y + 3.2],
+      [40.6, y + 3.2],
+    ],
+    doorIn: [36, y + 3],
+    doorOut: [33, y + 3],
+  };
+}
+
+export const rooms: Room[] = [
+  leftRoom("marketing", 1),
+  leftRoom("finance", 8.5),
+  leftRoom("export", 16),
+  leftRoom("finapp", 23.5),
+  rightRoom("blazerent", 1),
+  rightRoom("brain", 8.5),
+  rightRoom("finly", 16),
+  rightRoom("rnd", 23.5),
+];
+
+export function roomOf(dept: DeptKey): Room {
+  return rooms.find((r) => r.dept === dept)!;
+}
+
+export function roomAt(x: number, y: number): Room | null {
+  return (
+    rooms.find((r) => x >= r.x - 0.5 && x <= r.x + r.w + 0.5 && y >= r.y - 0.5 && y <= r.y + r.h + 0.5) ?? null
+  );
+}
+
+/** hangout spots in the commons (couch seats, coffee, collab chairs, games…) */
+export const HANGOUTS: { x: number; y: number; vibe: "coffee" | "couch" | "collab" | "game" | "walk" }[] = [
+  { x: 19.5, y: 3.6, vibe: "coffee" },
+  { x: 22.5, y: 3.6, vibe: "coffee" },
+  { x: 15.2, y: 5.2, vibe: "couch" },
+  { x: 16.8, y: 5.2, vibe: "couch" },
+  { x: 28.2, y: 5.2, vibe: "couch" },
+  { x: 29.8, y: 5.2, vibe: "couch" },
+  { x: 18.5, y: 13.2, vibe: "collab" },
+  { x: 21.5, y: 13.2, vibe: "collab" },
+  { x: 24.5, y: 13.2, vibe: "collab" },
+  { x: 18.5, y: 17.0, vibe: "collab" },
+  { x: 21.5, y: 17.0, vibe: "collab" },
+  { x: 24.5, y: 17.0, vibe: "collab" },
+  { x: 16.0, y: 24.6, vibe: "game" },
+  { x: 21.6, y: 24.6, vibe: "game" },
+  { x: 29.5, y: 23.6, vibe: "walk" },
+  { x: 32.6, y: 24.4, vibe: "walk" },
+  { x: 14.0, y: 10.0, vibe: "walk" },
+  { x: 30.0, y: 10.0, vibe: "walk" },
+  { x: 14.5, y: 20.5, vibe: "walk" },
+  { x: 30.5, y: 20.5, vibe: "walk" },
 ];

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { departments, workers, type DeptKey } from "@/server/office/registry";
-import IsoOffice, { type WorkerLive } from "./IsoOffice";
+import OfficeMap, { type WorkerLive } from "./OfficeMap";
 import TaskDetail from "./TaskDetail";
 import { BOARD_W, BOARD_H } from "./layout";
 
@@ -116,22 +116,10 @@ export default function OfficeClient() {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* header */}
-      <header className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3">
-        <div className="flex items-center gap-3">
-          <span className="font-pixel text-[10px] text-[var(--accent)]">AI OS</span>
-          <span className="text-xs text-[var(--muted)]">Virtual Office · Project Ablaze HQ</span>
-          <span className={`ml-2 h-2 w-2 rounded-full ${anyWorking ? "led-blink bg-amber-400" : "bg-emerald-500"}`} />
-          <span className="text-[10px] text-[var(--muted)]">{anyWorking ? "team working" : "all quiet"}</span>
-        </div>
-        <button
-          onClick={async () => {
-            await fetch("/api/auth/logout", { method: "POST" });
-            router.push("/login");
-          }}
-          className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--muted)] hover:text-white"
-        >
-          Log out
-        </button>
+      <header className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-3">
+        <span className="text-xs text-[var(--muted)]">Office HQ · all 8 departments</span>
+        <span className={`ml-1 h-2 w-2 rounded-full ${anyWorking ? "led-blink bg-amber-400" : "bg-emerald-500"}`} />
+        <span className="text-[10px] text-[var(--muted)]">{anyWorking ? "team working" : "free time — agents hanging out"}</span>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -145,7 +133,7 @@ export default function OfficeClient() {
               transform: "translate(-50%, -50%)",
             }}
           >
-            <IsoOffice live={live} scale={scale} onDeptClick={(d) => setDept(d)} />
+            <OfficeMap live={live} scale={scale} onDeptClick={(d) => setDept(d)} />
           </div>
         </main>
 
