@@ -18,8 +18,12 @@ interface MsgRow {
   content: string;
 }
 
-function transcript(msgs: MsgRow[]): string {
+/** Keeps only the most recent N turns — a growing collab/DM would otherwise resend the whole
+ *  history (plus PORTFOLIO_CONTEXT) on every single call, blowing through Groq's per-minute
+ *  token limits well before the conversation is actually done. */
+function transcript(msgs: MsgRow[], maxTurns = 14): string {
   return msgs
+    .slice(-maxTurns)
     .map((m) => {
       if (m.role === "user") return `Abdulaziz (boss): ${m.content}`;
       if (m.worker_key && workers[m.worker_key]) {
