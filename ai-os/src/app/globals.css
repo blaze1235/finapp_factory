@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0d0f1a;
+  --panel: #161a2c;
+  --panel-2: #1c2138;
+  --border: #2a3050;
+  --text: #e5e9ff;
+  --muted: #8b93b8;
+  --accent: #818cf8;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  height: 100%;
+}
+
+.pixelated {
+  image-rendering: pixelated;
+}
+
+/* agent bob while working */
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+.anim-bob { animation: bob 0.5s steps(2, end) infinite; }
+
+/* slow idle sway */
+@keyframes sway {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+.anim-sway { animation: sway 2.4s ease-in-out infinite; }
+
+/* typing dots in bubble */
+@keyframes dots {
+  0% { content: "·"; }
+  33% { content: "··"; }
+  66% { content: "···"; }
+}
+.typing-dots::after {
+  content: "···";
+  animation: dots 0.9s steps(1) infinite;
+}
+
+/* active room glow */
+@keyframes roomPulse {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.06); }
+  50% { box-shadow: inset 0 0 24px 4px rgba(255, 255, 255, 0.10); }
+}
+.room-active { animation: roomPulse 1.8s ease-in-out infinite; }
+
+/* ticker slide-in */
+@keyframes tickIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tick-in { animation: tickIn 0.25s ease-out; }
+
+/* status LED blink */
+@keyframes led {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.led-blink { animation: led 1s steps(1) infinite; }
+
+.font-pixel {
+  font-family: var(--font-pixel), monospace;
+}
+
+/* markdown deliverable styling */
+.deliverable {
+  font-size: 0.85rem;
+  line-height: 1.65;
+}
+.deliverable h1, .deliverable h2, .deliverable h3 {
+  font-weight: 700;
+  margin: 1.2em 0 0.4em;
+  color: var(--text);
+}
+.deliverable h1 { font-size: 1.15rem; }
+.deliverable h2 { font-size: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.deliverable h3 { font-size: 0.9rem; }
+.deliverable p { margin: 0.5em 0; }
+.deliverable ul, .deliverable ol { margin: 0.5em 0 0.5em 1.4em; }
+.deliverable ul { list-style: disc; }
+.deliverable ol { list-style: decimal; }
+.deliverable li { margin: 0.2em 0; }
+.deliverable table { border-collapse: collapse; margin: 0.8em 0; width: 100%; font-size: 0.8rem; }
+.deliverable th, .deliverable td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; }
+.deliverable th { background: var(--panel-2); }
+.deliverable code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 0.78rem; }
+.deliverable pre { background: var(--panel-2); padding: 10px; border-radius: 8px; overflow-x: auto; margin: 0.8em 0; }
+.deliverable blockquote { border-left: 3px solid var(--accent); padding-left: 10px; color: var(--muted); margin: 0.6em 0; }
+.deliverable input[type="checkbox"] { margin-right: 6px; }
