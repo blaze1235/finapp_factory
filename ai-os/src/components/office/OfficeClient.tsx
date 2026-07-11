@@ -113,18 +113,51 @@ export default function OfficeClient() {
 
   const anyWorking = Object.values(live).some((v) => v.status === "working");
 
+  async function callParty(kind: "gather" | "coffeebreak" | "party") {
+    await fetch("/api/office/party", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind }),
+    });
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* header */}
-      <header className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-3">
+      <header className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-5 py-3">
         <span className="text-xs text-[var(--muted)]">Office HQ · all 8 departments</span>
         <span className={`ml-1 h-2 w-2 rounded-full ${anyWorking ? "led-blink bg-amber-400" : "bg-emerald-500"}`} />
-        <span className="text-[10px] text-[var(--muted)]">{anyWorking ? "team working" : "free time — agents hanging out"}</span>
+        <span className="hidden text-[10px] text-[var(--muted)] sm:inline">
+          {anyWorking ? "team working" : "free time — agents hanging out"}
+        </span>
+        <div className="ml-auto flex gap-1.5">
+          <button
+            onClick={() => callParty("gather")}
+            title="Pull idle agents to the collab table — AI-free, instant"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white"
+          >
+            🤝 Gather
+          </button>
+          <button
+            onClick={() => callParty("coffeebreak")}
+            title="Send idle agents to the lounge — AI-free, instant"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white"
+          >
+            ☕ Coffee break
+          </button>
+          <button
+            onClick={() => callParty("party")}
+            title="Everyone idle parties in the commons — AI-free, instant"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white"
+          >
+            🎉 Party
+          </button>
+        </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         {/* office board */}
-        <main ref={boardWrap} className="relative min-w-0 flex-1 overflow-hidden p-4">
+        <main ref={boardWrap} className="relative min-h-[42vh] min-w-0 flex-1 overflow-hidden p-4 md:min-h-0">
           <div
             className="absolute left-1/2 top-1/2"
             style={{
@@ -138,7 +171,7 @@ export default function OfficeClient() {
         </main>
 
         {/* sidebar */}
-        <aside className="flex w-[340px] shrink-0 flex-col border-l border-[var(--border)] bg-[var(--panel)]">
+        <aside className="flex max-h-[46vh] w-full shrink-0 flex-col border-t border-[var(--border)] bg-[var(--panel)] md:max-h-none md:w-[340px] md:border-l md:border-t-0">
           {/* composer */}
           <div className="border-b border-[var(--border)] p-4">
             <label className="font-pixel text-[7px] tracking-wider text-[var(--muted)]">NEW TASK</label>

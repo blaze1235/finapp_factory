@@ -2,6 +2,15 @@ import { GoogleGenAI } from "@google/genai";
 
 type Provider = "groq" | "gemini";
 
+// Free-tier Groq models, each with its OWN rate-limit bucket — if one is
+// saturated mid-collab, the next still has headroom. Ordered fastest+best first.
+const GROQ_MODEL_CHAIN = [
+  process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+  "openai/gpt-oss-120b",
+  "qwen/qwen3-32b",
+  "llama-3.1-8b-instant",
+].filter((m, i, arr) => arr.indexOf(m) === i);
+
 function providerOrder(): Provider[] {
   const env = process.env.LLM_PROVIDER;
   if (env) {
@@ -16,9 +25,12 @@ function providerOrder(): Provider[] {
   return list.length ? list : ["groq"];
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // ── Groq (OpenAI-compatible REST) ─────────────────────
-async function groqCall(system: string, user: string, json: boolean): Promise<string> {
-  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set");
+async function groqCallOnce(model: string, system: string, user: string, json: boolean): Promise<string> {
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -26,21 +38,53 @@ async function groqCall(system: string, user: string, json: boolean): Promise<st
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      model,
       temperature: json ? 0.4 : 0.7,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
+      // reasoning models (qwen3, gpt-oss) emit <think> blocks by default — hide them
+      reasoning_format: "hidden",
       ...(json ? { response_format: { type: "json_object" } } : {}),
     }),
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Groq ${res.status}: ${body.slice(0, 200)}`);
+    const err = new Error(`Groq/${model} ${res.status}: ${body.slice(0, 200)}`);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
   }
   const data = await res.json();
-  return data?.choices?.[0]?.message?.content ?? "";
+  return stripThinking(data?.choices?.[0]?.message?.content ?? "");
+}
+
+/** Belt-and-suspenders: strip any leaked chain-of-thought even if reasoning_format was ignored. */
+function stripThinking(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+/** Tries every free Groq model in the chain before giving up. */
+async function groqCall(system: string, user: string, json: boolean): Promise<string> {
+  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set");
+  let lastErr: unknown;
+  for (const model of GROQ_MODEL_CHAIN) {
+    try {
+      const out = await groqCallOnce(model, system, user, json);
+      if (out && out.trim()) return out;
+      lastErr = new Error(`Groq/${model} returned empty response`);
+    } catch (e) {
+      lastErr = e;
+      const status = (e as Error & { status?: number }).status;
+      if (status === 429) {
+        // brief backoff, then let the loop try the NEXT model (different bucket)
+        await sleep(400);
+        continue;
+      }
+      // non-rate-limit error: still try the next model rather than aborting
+    }
+  }
+  throw lastErr ?? new Error("All Groq models failed");
 }
 
 // ── Gemini ────────────────────────────────────────────

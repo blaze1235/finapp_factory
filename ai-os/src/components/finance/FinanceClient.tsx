@@ -156,8 +156,8 @@ export default function FinanceClient() {
         </div>
 
         {/* table */}
-        <div className="mt-5 overflow-hidden rounded-xl border border-[var(--border)]">
-          <table className="w-full text-left text-xs">
+        <div className="mt-5 overflow-x-auto rounded-xl border border-[var(--border)]">
+          <table className="w-full min-w-[560px] text-left text-xs">
             <thead className="bg-[var(--panel)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
               <tr>
                 <th className="px-3 py-2">Date</th>

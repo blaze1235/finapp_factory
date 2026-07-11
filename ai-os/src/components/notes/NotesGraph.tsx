@@ -229,7 +229,7 @@ export default function NotesGraph() {
 
       {/* note panel */}
       {selected && (
-        <aside className="flex w-[440px] shrink-0 flex-col border-l border-[var(--border)] bg-[var(--panel)]">
+        <aside className="fixed inset-0 z-40 flex flex-col border-l border-[var(--border)] bg-[var(--panel)] md:static md:inset-auto md:z-auto md:w-[440px] md:shrink-0">
           <div className="flex items-start justify-between gap-2 border-b border-[var(--border)] p-4">
             <div>
               <span

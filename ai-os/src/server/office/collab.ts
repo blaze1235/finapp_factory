@@ -2,6 +2,9 @@ import { sql } from "@/server/db";
 import { departments, workers, type DeptKey } from "./registry";
 import { PORTFOLIO_CONTEXT } from "./context";
 import { generate, generateJson } from "./llm";
+import { beginCollab, endCollab } from "./simEngine";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const CHAT_STYLE =
   "This is a live office chat, not a report. Reply as yourself in 40-140 words, conversational but substantive. React to what others said (agree, push back, add numbers). No headings, no sign-offs. Plain text or light markdown (bold, short lists) only.";
@@ -91,22 +94,29 @@ export async function runOfficeCollab(chatId: string): Promise<void> {
       .slice(0, 6);
     if (picked.length === 0) throw new Error("No participants selected");
 
-    const running: MsgRow[] = [...msgs];
-    for (const p of picked) {
-      const w = workers[p.worker];
-      const text = await generate(
-        `${w.persona}\n${PORTFOLIO_CONTEXT}\nYou were pulled into the all-hands office chat to discuss the boss's idea. Your angle: ${p.angle}. Be honest — if numbers don't work, say so with estimates; if the market signal is good, back it with reasoning. ${CHAT_STYLE}`,
-        `Discussion so far:\n\n${transcript(running)}\n\nSpeak now as ${w.name}.`,
-      );
-      await addMessage(chatId, w.key, text);
-      running.push({ role: "agent", worker_key: w.key, content: text });
-    }
+    const pickedKeys = picked.map((p) => p.worker);
+    beginCollab(pickedKeys);
+    try {
+      const running: MsgRow[] = [...msgs];
+      for (const p of picked) {
+        const w = workers[p.worker];
+        const text = await generate(
+          `${w.persona}\n${PORTFOLIO_CONTEXT}\nYou were pulled into the all-hands office chat to discuss the boss's idea. Your angle: ${p.angle}. Be honest — if numbers don't work, say so with estimates; if the market signal is good, back it with reasoning. ${CHAT_STYLE}`,
+          `Discussion so far:\n\n${transcript(running)}\n\nSpeak now as ${w.name}.`,
+        );
+        await addMessage(chatId, w.key, text);
+        running.push({ role: "agent", worker_key: w.key, content: text });
+        await sleep(350);
+      }
 
-    const summary = await generate(
-      `You are the Master Orchestrator. Wrap up the office discussion for Abdulaziz. Output compact markdown: **Verdict** (1-2 sentences, honest), **Key points** (3-5 bullets crediting who said what), **Action items** (checklist). Under 180 words.\n${PORTFOLIO_CONTEXT}`,
-      `Idea: """${lastUser}"""\n\nDiscussion:\n\n${transcript(running)}`,
-    );
-    await addMessage(chatId, null, summary);
+      const summary = await generate(
+        `You are the Master Orchestrator. Wrap up the office discussion for Abdulaziz. Output compact markdown: **Verdict** (1-2 sentences, honest), **Key points** (3-5 bullets crediting who said what), **Action items** (checklist). Under 180 words.\n${PORTFOLIO_CONTEXT}`,
+        `Idea: """${lastUser}"""\n\nDiscussion:\n\n${transcript(running)}`,
+      );
+      await addMessage(chatId, null, summary);
+    } finally {
+      endCollab(pickedKeys);
+    }
   } catch (e) {
     await addMessage(chatId, null, `⚠️ Collab failed: ${String(e).slice(0, 180)}`);
   } finally {

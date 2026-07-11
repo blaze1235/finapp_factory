@@ -115,9 +115,11 @@ export default function ChatsClient() {
   const deptChats = chats.filter((c) => c.scope === "dept");
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-full">
       {/* chat list */}
-      <aside className="flex w-[250px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel)]">
+      <aside
+        className={`${activeId ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel)] md:w-[250px]`}
+      >
         <div className="flex items-center justify-between px-4 pb-2 pt-4">
           <span className="font-pixel text-[8px] tracking-wider text-[var(--muted)]">CHATS</span>
           <button
@@ -173,10 +175,16 @@ export default function ChatsClient() {
       </aside>
 
       {/* thread */}
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className={`${activeId ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
         {active ? (
           <>
             <header className="flex items-center gap-2.5 border-b border-[var(--border)] px-5 py-3.5">
+              <button
+                onClick={() => setActiveId(null)}
+                className="mr-1 rounded-lg border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted)] hover:text-white md:hidden"
+              >
+                ←
+              </button>
               <span className="text-base">{active.scope === "office" ? "🏢" : "👥"}</span>
               <div>
                 <h1 className="text-sm font-semibold">{active.title}</h1>
