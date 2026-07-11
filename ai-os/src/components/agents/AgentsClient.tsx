@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { departments, deptWorkers } from "@/server/office/registry";
+import { departments, deptWorkers, type DeptKey } from "@/server/office/registry";
 
 interface ActiveTask {
   id: string;
@@ -11,8 +11,16 @@ interface ActiveTask {
   subtasks: { worker: string; status: string }[];
 }
 
+// which department maps to which of the user's other apps, for the live-data badge
+const DEPT_SOURCE: Partial<Record<DeptKey, "blazerent" | "finly" | "bika">> = {
+  blazerent: "blazerent",
+  finly: "finly",
+  finapp: "bika",
+};
+
 export default function AgentsClient() {
   const [working, setWorking] = useState<Set<string>>(new Set());
+  const [dataStatus, setDataStatus] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const poll = async () => {
@@ -33,6 +41,10 @@ export default function AgentsClient() {
     };
     poll();
     const t = setInterval(poll, 4000);
+    fetch("/api/datasources/status")
+      .then((r) => r.json())
+      .then(setDataStatus)
+      .catch(() => {});
     return () => clearInterval(t);
   }, []);
 
@@ -56,6 +68,22 @@ export default function AgentsClient() {
                     {dept.name}
                   </h2>
                   <span className="text-[10px] text-[var(--muted)]">{dept.description}</span>
+                  {DEPT_SOURCE[dept.key] && (
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[9px] ${
+                        dataStatus[DEPT_SOURCE[dept.key]!]
+                          ? "border-emerald-600/40 text-emerald-400"
+                          : "border-[var(--border)] text-[var(--muted)]"
+                      }`}
+                      title={
+                        dataStatus[DEPT_SOURCE[dept.key]!]
+                          ? "Live read-only database connected"
+                          : "No live data connected yet — ask Claude to wire it up once you share a read-only connection string"
+                      }
+                    >
+                      {dataStatus[DEPT_SOURCE[dept.key]!] ? "🔌 live data" : "⚪ no live data"}
+                    </span>
+                  )}
                   <Link
                     href={`/chats?dept=${dept.key}`}
                     className="ml-auto rounded-lg border border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white"

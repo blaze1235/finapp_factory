@@ -121,6 +121,14 @@ export default function OfficeClient() {
     });
   }
 
+  async function callPlace(mode: "place" | "free") {
+    await fetch("/api/office/place", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* header */}
@@ -151,6 +159,21 @@ export default function OfficeClient() {
             className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white"
           >
             🎉 Party
+          </button>
+          <span className="mx-0.5 w-px self-stretch bg-[var(--border)]" />
+          <button
+            onClick={() => callPlace("place")}
+            title="Send every idle agent back to their own desk and keep them there"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)] transition hover:border-sky-400 hover:text-white"
+          >
+            📍 Place
+          </button>
+          <button
+            onClick={() => callPlace("free")}
+            title="Cancel place/party — agents move freely again"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)] transition hover:border-emerald-400 hover:text-white"
+          >
+            🕊️ Free
           </button>
         </div>
       </header>

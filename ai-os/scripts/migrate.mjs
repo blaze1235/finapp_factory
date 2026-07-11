@@ -40,11 +40,14 @@ await sql`
     id TEXT PRIMARY KEY,
     scope TEXT NOT NULL DEFAULT 'dept',
     department TEXT,
+    worker_key TEXT,
     title TEXT NOT NULL,
     busy BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+await sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS worker_key TEXT`;
+await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_dm_worker ON chats(worker_key) WHERE scope = 'dm'`;
 
 await sql`
   CREATE TABLE IF NOT EXISTS messages (

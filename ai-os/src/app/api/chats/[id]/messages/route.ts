@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import { isAuthed } from "@/server/auth";
 import { sql } from "@/server/db";
-import { runDeptReply, runOfficeCollab } from "@/server/office/collab";
+import { runDeptReply, runOfficeCollab, runDmReply } from "@/server/office/collab";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -19,6 +19,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             VALUES (${id}, 'user', NULL, ${content.trim()})`;
   await sql`UPDATE chats SET busy = true, updated_at = now() WHERE id = ${id}`;
 
-  after(() => (chat.scope === "office" ? runOfficeCollab(id) : runDeptReply(id)));
+  after(() => {
+    if (chat.scope === "office") return runOfficeCollab(id);
+    if (chat.scope === "dm") return runDmReply(id);
+    return runDeptReply(id);
+  });
   return NextResponse.json({ ok: true });
 }

@@ -5,7 +5,7 @@ import { sql } from "@/server/db";
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  const [chat] = await sql`SELECT id, scope, department, title, busy FROM chats WHERE id = ${id}`;
+  const [chat] = await sql`SELECT id, scope, department, worker_key, title, busy FROM chats WHERE id = ${id}`;
   if (!chat) return NextResponse.json({ error: "not found" }, { status: 404 });
   const messages = await sql`SELECT id, role, worker_key, content, created_at FROM messages
                              WHERE chat_id = ${id} ORDER BY id LIMIT 200`;

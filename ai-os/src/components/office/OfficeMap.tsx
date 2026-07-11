@@ -12,16 +12,21 @@ interface Position {
   x: number;
   y: number;
   walking: boolean;
-  mode: "desk" | "collab" | "party" | "idle";
+  mode: "desk" | "collab" | "party" | "placed" | "idle";
   talking: boolean;
   emoji?: string;
 }
 
 /** Positions live server-side (src/server/office/simEngine.ts) so every tab/device sees the same office. */
 function usePositions() {
-  const [data, setData] = useState<{ positions: Record<string, Position>; party: { kind: string; until: number } | null }>({
+  const [data, setData] = useState<{
+    positions: Record<string, Position>;
+    party: { kind: string; until: number } | null;
+    officeMode: "placed" | "party" | "free";
+  }>({
     positions: {},
     party: null,
+    officeMode: "free",
   });
   useEffect(() => {
     let alive = true;
@@ -242,7 +247,7 @@ export default function OfficeMap({
   scale: number;
   onDeptClick?: (d: DeptKey) => void;
 }) {
-  const { positions, party } = usePositions();
+  const { positions, party, officeMode } = usePositions();
 
   return (
     <div
@@ -340,13 +345,21 @@ export default function OfficeMap({
       <Plant x={13} y={27.2} />
       <Plant x={33} y={27.2} />
 
-      {/* party banner */}
+      {/* mode banner */}
       {party && (
         <div
           className="absolute z-40 rounded-full border border-amber-300/60 bg-[#1a2036] px-3 py-1 font-pixel text-[8px] tracking-wide text-amber-300"
-          style={{ left: 16 * TILE, top: -1.4 * TILE }}
+          style={{ left: 16 * TILE, top: 3 }}
         >
           {party.kind === "party" ? "🎉 PARTY MODE" : party.kind === "coffeebreak" ? "☕ COFFEE BREAK" : "🤝 GATHERING"}
+        </div>
+      )}
+      {officeMode === "placed" && (
+        <div
+          className="absolute z-40 rounded-full border border-sky-300/60 bg-[#1a2036] px-3 py-1 font-pixel text-[8px] tracking-wide text-sky-300"
+          style={{ left: 16.5 * TILE, top: 3 }}
+        >
+          📍 EVERYONE AT DESKS
         </div>
       )}
 

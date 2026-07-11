@@ -9,6 +9,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const CHAT_STYLE =
   "This is a live office chat, not a report. Reply as yourself in 40-140 words, conversational but substantive. React to what others said (agree, push back, add numbers). No headings, no sign-offs. Plain text or light markdown (bold, short lists) only.";
 
+const DM_STYLE =
+  "This is a private 1:1 chat with Abdulaziz, your boss — not a group channel. Be direct, personal and concise (30-120 words). You can ask him clarifying questions. No headings, no \"as an AI\" framing, no sign-offs. Plain text or light markdown only.";
+
 interface MsgRow {
   role: string;
   worker_key: string | null;
@@ -59,6 +62,27 @@ export async function runDeptReply(chatId: string): Promise<void> {
 
     const reply = await generate(
       `${speaker.persona}\n${PORTFOLIO_CONTEXT}\nYou are chatting in the "${chat.title}" channel of the ${dept.name} room. ${CHAT_STYLE}`,
+      `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
+    );
+    await addMessage(chatId, speaker.key, reply);
+  } catch (e) {
+    await addMessage(chatId, null, `⚠️ Reply failed: ${String(e).slice(0, 180)}`);
+  } finally {
+    await setBusy(chatId, false);
+  }
+}
+
+/** Direct message: always replies as the one specific worker this thread belongs to. */
+export async function runDmReply(chatId: string): Promise<void> {
+  try {
+    const [chat] = await sql`SELECT * FROM chats WHERE id = ${chatId}`;
+    const speaker = chat?.worker_key ? workers[chat.worker_key] : null;
+    if (!speaker) return;
+    const msgs = (await sql`SELECT role, worker_key, content FROM messages
+                            WHERE chat_id = ${chatId} ORDER BY id DESC LIMIT 24`).reverse() as unknown as MsgRow[];
+
+    const reply = await generate(
+      `${speaker.persona}\n${PORTFOLIO_CONTEXT}\n${DM_STYLE}`,
       `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
     );
     await addMessage(chatId, speaker.key, reply);

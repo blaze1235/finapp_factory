@@ -7,7 +7,7 @@ interface P {
   y: number;
 }
 
-type Mode = "desk" | "collab" | "party" | "idle";
+type Mode = "desk" | "collab" | "party" | "placed" | "idle";
 
 interface Sim extends P {
   path: P[];
@@ -106,6 +106,7 @@ declare global {
     collabAssignment: Map<string, P>;
     partyAssignment: Map<string, P>;
     party: { kind: PartyKind; until: number } | null;
+    placed: boolean;
     started: boolean;
   } | undefined;
 }
@@ -123,6 +124,7 @@ function engine() {
       collabAssignment: new Map(),
       partyAssignment: new Map(),
       party: null,
+      placed: false,
       started: false,
     };
   }
@@ -173,6 +175,9 @@ function tick() {
     } else if (isCollab) {
       goal = e.collabAssignment.get(w.key)!;
       mode = "collab";
+    } else if (e.placed) {
+      goal = deskSeat(w);
+      mode = "placed";
     } else if (partyOn) {
       if (!e.partyAssignment.has(w.key)) {
         const spots = PARTY_SPOTS[partyOn.kind];
@@ -278,9 +283,33 @@ export function partyStatus() {
 
 export function startParty(kind: PartyKind) {
   const e = engine();
+  e.placed = false;
   e.party = { kind, until: Date.now() + PARTY_DURATION_MS[kind] };
   e.partyAssignment.clear();
   return e.party;
+}
+
+/** "Place": send every idle agent back to their own desk and keep them there until "free". */
+export function placeEveryone() {
+  const e = engine();
+  e.placed = true;
+  e.party = null;
+  e.partyAssignment.clear();
+}
+
+/** "Free": cancel place/party overrides — agents resume normal wandering. */
+export function freeEveryone() {
+  const e = engine();
+  e.placed = false;
+  e.party = null;
+  e.partyAssignment.clear();
+}
+
+export function officeMode(): "placed" | "party" | "free" {
+  const e = engine();
+  if (e.placed) return "placed";
+  if (e.party && Date.now() < e.party.until) return "party";
+  return "free";
 }
 
 /** Called by the collab engine when an office debate starts — routes participants to the collab table. */

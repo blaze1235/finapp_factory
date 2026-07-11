@@ -11,6 +11,9 @@ const GROQ_MODEL_CHAIN = [
   "llama-3.1-8b-instant",
 ].filter((m, i, arr) => arr.indexOf(m) === i);
 
+// Only reasoning-capable models accept reasoning_format — llama-3.x rejects it with a 400.
+const REASONING_MODELS = new Set(["qwen/qwen3-32b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
+
 function providerOrder(): Provider[] {
   const env = process.env.LLM_PROVIDER;
   if (env) {
@@ -44,8 +47,9 @@ async function groqCallOnce(model: string, system: string, user: string, json: b
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      // reasoning models (qwen3, gpt-oss) emit <think> blocks by default — hide them
-      reasoning_format: "hidden",
+      // reasoning models (qwen3, gpt-oss) emit <think> blocks by default — hide them.
+      // Non-reasoning models (llama-3.x) reject this param with a 400, so only send it when supported.
+      ...(REASONING_MODELS.has(model) ? { reasoning_format: "hidden" } : {}),
       ...(json ? { response_format: { type: "json_object" } } : {}),
     }),
   });
@@ -65,26 +69,25 @@ function stripThinking(text: string): string {
 }
 
 /** Tries every free Groq model in the chain before giving up. */
-async function groqCall(system: string, user: string, json: boolean): Promise<string> {
-  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set");
-  let lastErr: unknown;
+async function groqCall(system: string, user: string, json: boolean): Promise<{ text: string; errors: string[] }> {
+  if (!process.env.GROQ_API_KEY) return { text: "", errors: ["Groq: GROQ_API_KEY not set"] };
+  const errors: string[] = [];
   for (const model of GROQ_MODEL_CHAIN) {
     try {
       const out = await groqCallOnce(model, system, user, json);
-      if (out && out.trim()) return out;
-      lastErr = new Error(`Groq/${model} returned empty response`);
+      if (out && out.trim()) return { text: out, errors };
+      errors.push(`${model}: empty response`);
     } catch (e) {
-      lastErr = e;
       const status = (e as Error & { status?: number }).status;
+      errors.push(`${model}: ${status ?? "?"} ${String((e as Error).message).slice(0, 100)}`);
       if (status === 429) {
         // brief backoff, then let the loop try the NEXT model (different bucket)
         await sleep(400);
-        continue;
       }
       // non-rate-limit error: still try the next model rather than aborting
     }
   }
-  throw lastErr ?? new Error("All Groq models failed");
+  return { text: "", errors };
 }
 
 // ── Gemini ────────────────────────────────────────────
@@ -106,18 +109,23 @@ async function geminiCall(system: string, user: string, json: boolean): Promise<
 
 async function run(system: string, user: string, json: boolean): Promise<string> {
   const providers = providerOrder();
-  let lastErr: unknown;
+  const errors: string[] = [];
   for (const p of providers) {
     try {
-      const out = p === "groq" ? await groqCall(system, user, json) : await geminiCall(system, user, json);
-      if (out && out.trim()) return out;
-      lastErr = new Error(`${p} returned empty response`);
+      if (p === "groq") {
+        const { text, errors: groqErrors } = await groqCall(system, user, json);
+        if (text) return text;
+        errors.push(`Groq[${groqErrors.join(" | ")}]`);
+      } else {
+        const text = await geminiCall(system, user, json);
+        if (text && text.trim()) return text;
+        errors.push("Gemini: empty response");
+      }
     } catch (e) {
-      lastErr = e;
-      // try next provider
+      errors.push(`Gemini: ${String((e as Error).message).slice(0, 150)}`);
     }
   }
-  throw lastErr ?? new Error("No LLM provider available");
+  throw new Error(errors.join(" || ") || "No LLM provider available");
 }
 
 export async function generate(system: string, user: string): Promise<string> {

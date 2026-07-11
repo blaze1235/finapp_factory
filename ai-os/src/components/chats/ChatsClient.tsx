@@ -8,8 +8,9 @@ import { departments, workers, type DeptKey } from "@/server/office/registry";
 
 interface ChatRow {
   id: string;
-  scope: "office" | "dept";
+  scope: "office" | "dept" | "dm";
   department: string | null;
+  worker_key: string | null;
   title: string;
   busy: boolean;
   updated_at: string;
@@ -96,6 +97,19 @@ export default function ChatsClient() {
     }
   }
 
+  async function openDm(workerKey: string) {
+    const res = await fetch("/api/chats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "dm", worker: workerKey }),
+    });
+    if (res.ok) {
+      const { id } = await res.json();
+      await loadChats();
+      setActiveId(id);
+    }
+  }
+
   async function send() {
     if (!activeId || !input.trim() || busy) return;
     const content = input.trim();
@@ -113,6 +127,8 @@ export default function ChatsClient() {
   const active = chats.find((c) => c.id === activeId);
   const officeChats = chats.filter((c) => c.scope === "office");
   const deptChats = chats.filter((c) => c.scope === "dept");
+  const dmChats = chats.filter((c) => c.scope === "dm");
+  const leadKeys = Object.values(departments).map((d) => d.lead);
 
   return (
     <div className="flex h-full">
@@ -138,29 +154,85 @@ export default function ChatsClient() {
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-xs outline-none"
             >
               <option value="office">🏢 Office · All-hands collab</option>
+              <option value="dm">🧑‍💼 Direct message…</option>
               {Object.values(departments).map((d) => (
                 <option key={d.key} value={d.key}>
                   {d.name}
                 </option>
               ))}
             </select>
-            <input
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && createChat(newScope, newTitle || "New chat")}
-              placeholder={newScope === "office" ? "Idea name…" : "Project, e.g. Bika design"}
-              className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-xs outline-none focus:border-[var(--accent)]"
-            />
-            <button
-              onClick={() => createChat(newScope, newTitle || "New chat")}
-              className="mt-2 w-full rounded-lg bg-[var(--accent)] py-1.5 text-xs font-semibold text-white hover:brightness-110"
-            >
-              Create
-            </button>
+            {newScope === "dm" ? (
+              <select
+                onChange={(e) => e.target.value && openDm(e.target.value)}
+                defaultValue=""
+                className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-xs outline-none focus:border-[var(--accent)]"
+              >
+                <option value="" disabled>
+                  Pick someone…
+                </option>
+                {Object.values(departments).map((d) => (
+                  <optgroup key={d.key} label={d.name}>
+                    {Object.values(workers)
+                      .filter((w) => w.dept === d.key)
+                      .map((w) => (
+                        <option key={w.key} value={w.key}>
+                          {w.name} {w.key === d.lead ? "★ lead" : ""} — {w.role}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+            ) : (
+              <>
+                <input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createChat(newScope, newTitle || "New chat")}
+                  placeholder={newScope === "office" ? "Idea name…" : "Project, e.g. Bika design"}
+                  className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-xs outline-none focus:border-[var(--accent)]"
+                />
+                <button
+                  onClick={() => createChat(newScope, newTitle || "New chat")}
+                  className="mt-2 w-full rounded-lg bg-[var(--accent)] py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                >
+                  Create
+                </button>
+              </>
+            )}
           </div>
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+          <p className="px-1 py-2 text-[10px] font-semibold tracking-wide text-[var(--muted)]">🧑‍💼 YOUR OFFICE · 1:1s</p>
+          {leadKeys.map((key) => {
+            const w = workers[key];
+            const existing = dmChats.find((c) => c.worker_key === key);
+            const dept = departments[w.dept];
+            return (
+              <button
+                key={key}
+                onClick={() => (existing ? setActiveId(existing.id) : openDm(key))}
+                className={`mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${
+                  existing?.id === activeId ? "bg-[var(--accent)]/15" : "hover:bg-[var(--panel-2)]"
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${existing?.busy ? "led-blink" : ""}`}
+                  style={{ background: existing?.busy ? "#facc15" : dept.accent }}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs">{w.name}</span>
+                  <span className="block text-[10px]" style={{ color: dept.accent }}>
+                    {w.role}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+          {dmChats.filter((c) => c.worker_key && !leadKeys.includes(c.worker_key)).map((c) => (
+            <ChatItem key={c.id} chat={c} active={c.id === activeId} onClick={() => setActiveId(c.id)} />
+          ))}
+
           <p className="px-1 py-2 text-[10px] font-semibold tracking-wide text-[var(--muted)]">🏢 OFFICE COLLABS</p>
           {officeChats.map((c) => (
             <ChatItem key={c.id} chat={c} active={c.id === activeId} onClick={() => setActiveId(c.id)} />
@@ -185,13 +257,15 @@ export default function ChatsClient() {
               >
                 ←
               </button>
-              <span className="text-base">{active.scope === "office" ? "🏢" : "👥"}</span>
+              <span className="text-base">{active.scope === "office" ? "🏢" : active.scope === "dm" ? "🧑‍💼" : "👥"}</span>
               <div>
                 <h1 className="text-sm font-semibold">{active.title}</h1>
                 <p className="text-[11px] text-[var(--muted)]">
                   {active.scope === "office"
                     ? "All-hands collab — relevant agents join the discussion"
-                    : departments[active.department as DeptKey]?.name}
+                    : active.scope === "dm"
+                      ? `${workers[active.worker_key ?? ""]?.role ?? ""} · ${departments[workers[active.worker_key ?? ""]?.dept as DeptKey]?.name ?? ""}`
+                      : departments[active.department as DeptKey]?.name}
                 </p>
               </div>
               {busy && (
@@ -228,7 +302,9 @@ export default function ChatsClient() {
                   placeholder={
                     active.scope === "office"
                       ? "Pitch an idea — finance, research, product will weigh in…"
-                      : "Message the team…"
+                      : active.scope === "dm"
+                        ? `Message ${active.title}…`
+                        : "Message the team…"
                   }
                   className="flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3.5 py-2.5 text-xs outline-none focus:border-[var(--accent)]"
                 />
@@ -247,8 +323,8 @@ export default function ChatsClient() {
             <span className="text-3xl">💬</span>
             <p className="text-sm text-[var(--muted)]">Pick a chat or create one.</p>
             <p className="max-w-xs text-[11px] text-[var(--muted)]">
-              Office collabs pull agents from every relevant department to debate your idea. Department chats are
-              project channels — one per topic.
+              Your Office holds 1:1s with team leads. Office collabs pull agents from every relevant department to
+              debate your idea. Department chats are project channels — one per topic.
             </p>
           </div>
         )}
@@ -258,7 +334,9 @@ export default function ChatsClient() {
 }
 
 function ChatItem({ chat, active, onClick }: { chat: ChatRow; active: boolean; onClick: () => void }) {
-  const dept = chat.department ? departments[chat.department as DeptKey] : null;
+  const w = chat.worker_key ? workers[chat.worker_key] : null;
+  const dept = w ? departments[w.dept] : chat.department ? departments[chat.department as DeptKey] : null;
+  const subtitle = chat.scope === "dm" ? w?.role ?? "Direct message" : dept?.name ?? "Office";
   return (
     <button
       onClick={onClick}
@@ -273,7 +351,7 @@ function ChatItem({ chat, active, onClick }: { chat: ChatRow; active: boolean; o
       <span className="min-w-0">
         <span className="block truncate text-xs">{chat.title}</span>
         <span className="block text-[10px]" style={{ color: dept?.accent ?? "var(--muted)" }}>
-          {dept?.name ?? "Office"}
+          {subtitle}
         </span>
       </span>
     </button>
