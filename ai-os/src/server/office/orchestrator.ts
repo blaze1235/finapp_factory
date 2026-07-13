@@ -4,7 +4,7 @@ import { notifyTaskFinished } from "@/server/telegram/handlers";
 import { departments, deptWorkers, workers, type DeptKey } from "./registry";
 import { PORTFOLIO_CONTEXT } from "./context";
 import { generate, generateJson } from "./llm";
-import { GROUNDING, liveDataFor, knowledgeFor } from "./grounding";
+import { GROUNDING, liveDataFor, knowledgeFor, projectContextFor } from "./grounding";
 
 interface PlanSubtask {
   worker: string;
@@ -86,7 +86,7 @@ export async function runTask(taskId: string): Promise<void> {
 
       try {
         const output = await generate(
-          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}${knowledge}\n${GROUNDING}`,
+          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}${await projectContextFor(w)}${knowledge}\n${GROUNDING}`,
           `Overall task: ${task.brief}\n\nYour subtask: ${row.title}\nInstructions: ${st.instructions}\n\n${outputs.length > 0 ? `Work already done by teammates:\n${outputs.map((o) => `### ${workers[o.worker].name} — ${o.title}\n${o.output}`).join("\n\n")}\n\nBuild on it, don't repeat it.` : ""}\n\nDeliver your part now.`,
         );
         outputs.push({ worker: w.key, title: row.title, output });
@@ -106,7 +106,7 @@ export async function runTask(taskId: string): Promise<void> {
     await emit(taskId, `${lead.name} is assembling the final deliverable…`, lead.key);
 
     const result = await generate(
-      `${lead.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(lead)}\n${GROUNDING}`,
+      `${lead.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(lead)}${await projectContextFor(lead)}\n${GROUNDING}`,
       `Task: ${task.brief}\n\nYour team produced:\n${outputs.map((o) => `## ${workers[o.worker].name} (${workers[o.worker].role}) — ${o.title}\n${o.output}`).join("\n\n")}\n\nAs team lead, merge everything into ONE polished, vault-ready Markdown deliverable. Structure: brief summary → the deliverable content → "## Action Items" checklist at the end. Resolve contradictions; cut fluff; keep the strongest ideas.`,
     );
 

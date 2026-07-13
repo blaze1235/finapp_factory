@@ -3,7 +3,7 @@ import { departments, workers, type DeptKey } from "./registry";
 import { PORTFOLIO_CONTEXT } from "./context";
 import { generate, generateJson } from "./llm";
 import { beginCollab, endCollab } from "./simEngine";
-import { GROUNDING, liveDataFor, knowledgeFor } from "./grounding";
+import { GROUNDING, liveDataFor, knowledgeFor, projectContextFor } from "./grounding";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -66,7 +66,7 @@ export async function runDeptReply(chatId: string): Promise<void> {
     }
 
     const reply = await generate(
-      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}${await knowledgeFor(lastUser)}\nYou are chatting in the "${chat.title}" channel of the ${dept.name} room. ${GROUNDING} ${CHAT_STYLE}`,
+      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}${await projectContextFor(speaker)}${await knowledgeFor(lastUser)}\nYou are chatting in the "${chat.title}" channel of the ${dept.name} room. ${GROUNDING} ${CHAT_STYLE}`,
       `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
     );
     await addMessage(chatId, speaker.key, reply);
@@ -88,7 +88,7 @@ export async function runDmReply(chatId: string): Promise<void> {
     const lastUser = [...msgs].reverse().find((m) => m.role === "user")?.content ?? "";
 
     const reply = await generate(
-      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}${await knowledgeFor(lastUser)}\n${GROUNDING} ${DM_STYLE}`,
+      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}${await projectContextFor(speaker)}${await knowledgeFor(lastUser)}\n${GROUNDING} ${DM_STYLE}`,
       `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
     );
     await addMessage(chatId, speaker.key, reply);
@@ -131,7 +131,7 @@ export async function runCollabReply(chatId: string): Promise<void> {
       for (const key of order) {
         const w = workers[key];
         const text = await generate(
-          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}${knowledge}\nYou're in a standing collab room called "${chat.title}" with: ${roomLabel}. Build on what your roommates just said in this same turn — don't repeat them, add your specialty's angle. ${GROUNDING} ${CHAT_STYLE}`,
+          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}${await projectContextFor(w)}${knowledge}\nYou're in a standing collab room called "${chat.title}" with: ${roomLabel}. Build on what your roommates just said in this same turn — don't repeat them, add your specialty's angle. ${GROUNDING} ${CHAT_STYLE}`,
           `Conversation so far:\n\n${transcript(running)}\n\nSpeak now as ${w.name}.`,
         );
         await addMessage(chatId, key, text);
@@ -181,7 +181,7 @@ export async function runOfficeCollab(chatId: string): Promise<void> {
       for (const p of picked) {
         const w = workers[p.worker];
         const text = await generate(
-          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}${knowledge}\nYou were pulled into the all-hands office chat to discuss the boss's idea. Your angle: ${p.angle}. Be honest — if the numbers don't work, say so; if data is missing, name it and ask. ${GROUNDING} ${CHAT_STYLE}`,
+          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}${await projectContextFor(w)}${knowledge}\nYou were pulled into the all-hands office chat to discuss the boss's idea. Your angle: ${p.angle}. Be honest — if the numbers don't work, say so; if data is missing, name it and ask. ${GROUNDING} ${CHAT_STYLE}`,
           `Discussion so far:\n\n${transcript(running)}\n\nSpeak now as ${w.name}.`,
         );
         await addMessage(chatId, w.key, text);

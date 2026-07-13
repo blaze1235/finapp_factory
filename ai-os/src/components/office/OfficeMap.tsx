@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { departments, deptWorkers, workers, type DeptKey, type Worker } from "@/server/office/registry";
-import { TILE, BOARD_W, BOARD_H, rooms } from "./layout";
+import { TILE, BOARD_W, BOARD_H, rooms, SERVER_ROOM } from "./layout";
 
 export interface WorkerLive {
   status: "idle" | "working" | "done";
@@ -237,6 +238,23 @@ function Whiteboard({ x, y }: { x: number; y: number }) {
   );
 }
 
+function ServerRack({ x, y }: { x: number; y: number }) {
+  return (
+    <div className="absolute" style={{ left: x * TILE, top: y * TILE, zIndex: Math.round(y * 10) }}>
+      <svg viewBox="0 0 20 34" width={1.7 * TILE} height={2.9 * TILE} shapeRendering="crispEdges">
+        <rect x={0} y={0} width={20} height={34} fill="#1c2333" stroke="#3a4166" strokeWidth={1} />
+        {[0, 1, 2, 3].map((i) => (
+          <g key={i}>
+            <rect x={2} y={2 + i * 8} width={16} height={6} fill="#262f47" />
+            <circle cx={5} cy={5 + i * 8} r={1} fill={i % 2 ? "#4ade80" : "#f87171"} className={i % 2 ? "led-blink" : undefined} />
+            <rect x={8} y={4 + i * 8} width={9} height={2} fill="#0f1420" />
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 // ── board ─────────────────────────────────────────────
 export default function OfficeMap({
   live,
@@ -248,6 +266,7 @@ export default function OfficeMap({
   onDeptClick?: (d: DeptKey) => void;
 }) {
   const { positions, party, officeMode } = usePositions();
+  const router = useRouter();
 
   return (
     <div
@@ -317,6 +336,43 @@ export default function OfficeMap({
           </div>
         );
       })}
+
+      {/* server room — project knowledge base, not a department */}
+      <div onClick={() => router.push("/server")} className="cursor-pointer">
+        <div
+          className="absolute"
+          style={{
+            left: SERVER_ROOM.x * TILE - 4,
+            top: SERVER_ROOM.y * TILE - 4,
+            width: SERVER_ROOM.w * TILE + 8,
+            height: SERVER_ROOM.h * TILE + 8,
+            background: "linear-gradient(#38bdf826, #38bdf826), #dfe2ea",
+            border: "4px solid #454e74",
+            borderRadius: 6,
+          }}
+        />
+        <div
+          className="absolute z-30 flex items-center gap-1.5 rounded px-2 py-[3px] font-pixel text-[7px] tracking-wide"
+          style={{
+            left: SERVER_ROOM.x * TILE + 4,
+            top: SERVER_ROOM.y * TILE - 14,
+            background: "#1a2036",
+            color: "#38bdf8",
+            border: "1px solid #38bdf866",
+          }}
+        >
+          🗄️ SERVER ROOM
+        </div>
+        <ServerRack x={SERVER_ROOM.x + 1.5} y={SERVER_ROOM.y + 1} />
+        <ServerRack x={SERVER_ROOM.x + 4} y={SERVER_ROOM.y + 1} />
+        <ServerRack x={SERVER_ROOM.x + 6.5} y={SERVER_ROOM.y + 1} />
+        <div
+          className="absolute text-center font-pixel text-[6px] leading-[9px] text-[#7c8ab8]"
+          style={{ left: SERVER_ROOM.x * TILE + 4, top: (SERVER_ROOM.y + 4.4) * TILE, width: (SERVER_ROOM.w - 1) * TILE }}
+        >
+          project files · notes · sheets
+        </div>
+      </div>
 
       {/* commons furniture */}
       <div className="absolute z-20 font-pixel text-[8px] tracking-widest text-[#8890ad]" style={{ left: 20.4 * TILE, top: 0.5 * TILE }}>

@@ -8,6 +8,7 @@ const items = [
   { href: "/chats", label: "Chats", icon: "💬" },
   { href: "/agents", label: "Agents", icon: "🧑‍💻" },
   { href: "/reports", label: "Reports", icon: "📊" },
+  { href: "/server", label: "Server", icon: "🗄️" },
   { href: "/notes", label: "Brain Net", icon: "🕸️" },
   { href: "/finance", label: "Finances", icon: "💰" },
 ];

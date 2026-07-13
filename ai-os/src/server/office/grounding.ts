@@ -1,3 +1,4 @@
+import { sql } from "@/server/db";
 import type { Worker } from "./registry";
 import { snapshot as blazerentSnapshot } from "@/server/datasources/blazerent";
 import { appSnapshot as finlyAppSnapshot, personalSnapshot as finlyPersonalSnapshot } from "@/server/datasources/finly";
@@ -22,4 +23,21 @@ export async function liveDataFor(w: Worker): Promise<string> {
 export async function knowledgeFor(query: string): Promise<string> {
   const hits = await searchKnowledge(query);
   return hits ? `\n\nTEAM KNOWLEDGE (from memory and past task deliverables — cite if relevant):\n${hits}` : "";
+}
+
+/**
+ * Live project definitions from the Server Room, for this worker's department. Abdulaziz edits
+ * these directly (no AI involved) — this is what makes an edit there instantly visible to every
+ * agent, replacing having to explain project context in conversation every time.
+ */
+export async function projectContextFor(w: Worker): Promise<string> {
+  try {
+    const rows = await sql`SELECT name, purpose FROM projects WHERE department = ${w.dept} ORDER BY sort_order, name`;
+    const list = (rows as unknown as { name: string; purpose: string }[]).filter((r) => r.purpose.trim());
+    if (list.length === 0) return "";
+    const text = list.map((r) => `- **${r.name}**: ${r.purpose}`).join("\n");
+    return `\n\nPROJECT DEFINITIONS (from the Server Room, written by Abdulaziz himself — this is ground truth, more current than anything else):\n${text}`;
+  } catch {
+    return "";
+  }
 }

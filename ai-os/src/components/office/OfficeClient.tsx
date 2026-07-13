@@ -133,7 +133,7 @@ export default function OfficeClient() {
     <div className="flex h-screen flex-col overflow-hidden">
       {/* header */}
       <header className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-5 py-3">
-        <span className="text-xs text-[var(--muted)]">Office HQ · all 8 departments</span>
+        <span className="text-xs text-[var(--muted)]">Office HQ · all 9 departments</span>
         <span className={`ml-1 h-2 w-2 rounded-full ${anyWorking ? "led-blink bg-amber-400" : "bg-emerald-500"}`} />
         <span className="hidden text-[10px] text-[var(--muted)] sm:inline">
           {anyWorking ? "team working" : "free time — agents hanging out"}

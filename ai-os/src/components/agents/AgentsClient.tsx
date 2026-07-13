@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { departments, deptWorkers, type DeptKey } from "@/server/office/registry";
+import { departments, deptWorkers, workers, type DeptKey } from "@/server/office/registry";
 
 interface ActiveTask {
   id: string;
@@ -16,7 +16,7 @@ interface ActiveTask {
 const DEPT_SOURCE: Partial<Record<DeptKey, "blazerent" | "finly" | "bika">> = {
   blazerent: "blazerent",
   finly: "finly",
-  finapp: "bika",
+  bika: "bika",
 };
 
 export default function AgentsClient() {
@@ -62,7 +62,7 @@ export default function AgentsClient() {
         <div>
           <h1 className="text-sm font-semibold">🧑‍💻 AI Agents</h1>
           <p className="text-[11px] text-[var(--muted)]">
-            {Object.values(departments).length} departments · 26 specialists. Click a team to open its chat.
+            {Object.values(departments).length} departments · {Object.keys(workers).length} specialists. Click a team to open its chat.
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">

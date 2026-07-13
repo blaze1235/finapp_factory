@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
   const form = await req.formData().catch(() => null);
   const file = form?.get("file");
   if (!file || typeof file === "string") return NextResponse.json({ error: "no file" }, { status: 400 });
+  const projectId = (form?.get("project_id") as string) || null;
 
   const name = file.name || "upload.txt";
   const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
   if (!content) return NextResponse.json({ error: "File has no extractable text" }, { status: 400 });
 
   const id = randomUUID();
-  await sql`INSERT INTO documents (id, filename, content, size_bytes) VALUES (${id}, ${name}, ${content}, ${buf.length})`;
+  await sql`INSERT INTO documents (id, filename, content, size_bytes, project_id) VALUES (${id}, ${name}, ${content}, ${buf.length}, ${projectId})`;
   return NextResponse.json({ id, filename: name, chars: content.length });
 }
 

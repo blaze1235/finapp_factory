@@ -18,6 +18,7 @@ export type DeptKey =
   | "export"
   | "finly"
   | "finapp"
+  | "bika"
   | "rnd";
 
 export interface Department {
@@ -93,13 +94,23 @@ export const departments: Record<DeptKey, Department> = {
   },
   finapp: {
     key: "finapp",
-    name: "FinApp & Bika",
+    name: "FinApp",
     short: "ERP",
     accent: "#60a5fa",
     floor: "#22314a",
     description:
-      "FinApp ERP + Bika B2B procurement: feature planning, supplier logic, inventory, analytics, AI recommendations.",
+      "ERP for small manufacturers, HoReCa and computer clubs (Finance/Production/Warehouse modules, FinBlaze club edition).",
     lead: "ravi",
+  },
+  bika: {
+    key: "bika",
+    name: "Bika",
+    short: "BKA",
+    accent: "#34d399",
+    floor: "#1e3a30",
+    description:
+      "B2B HoReCa procurement platform — digital trade agent connecting distributors directly to cafes, hotels, clubs, replacing manual agents for standardized reordering.",
+    lead: "kira",
   },
   rnd: {
     key: "rnd",
@@ -329,7 +340,7 @@ export const workers: Record<string, Worker> = {
     skin: "#f5c6a0",
   },
 
-  // ── FinApp & Bika (ERP / Procurement) ────────────────
+  // ── FinApp (ERP) ──────────────────────────────────────
   ravi: {
     key: "ravi",
     name: "Ravi",
@@ -340,25 +351,37 @@ export const workers: Record<string, Worker> = {
     shirt: "#60a5fa",
     skin: "#c68a5a",
   },
-  kira: {
-    key: "kira",
-    name: "Kira",
-    role: "Bika Procurement",
-    dept: "finapp",
-    persona: `You are Kira, procurement platform specialist for Bika (B2B platform connecting Uzbekistan HoReCa/stores to distributors, replacing traditional agents). You design supplier logic, ordering flows, pricing and distributor incentives. ${BASE_STYLE}`,
-    hair: "#7c2d12",
-    shirt: "#93c5fd",
-    skin: "#f5c6a0",
-  },
   olim: {
     key: "olim",
     name: "Olim",
     role: "Business Analytics",
     dept: "finapp",
-    persona: `You are Olim, business analyst for FinApp/Bika deployments (finapp-maccaldo, finapp-milkvill). You define dashboards, unit economics per client, and AI recommendation ideas grounded in real SMB operations. ${BASE_STYLE}`,
+    persona: `You are Olim, business analyst for FinApp deployments (finapp-maccaldo, finapp-milkvill). You define dashboards, unit economics per client, and grounded operational recommendations for real SMB clients. ${BASE_STYLE}`,
     hair: "#334155",
     shirt: "#3b82f6",
     skin: "#e8b48a",
+  },
+
+  // ── Bika (B2B HoReCa procurement) ─────────────────────
+  kira: {
+    key: "kira",
+    name: "Kira",
+    role: "Team Lead · Procurement Product",
+    dept: "bika",
+    persona: `You are Kira, product lead of Bika — a B2B platform connecting Uzbekistan HoReCa businesses (cafes, hotels, computer clubs) directly to distributors, replacing manual sales agents for routine reordering. You design supplier logic, ordering flows, pricing and distributor incentives. Bika does not aim to replace agents everywhere — they still matter for promotion and new-product launches; Bika only digitizes the standardized reorder flow. ${BASE_STYLE}`,
+    hair: "#7c2d12",
+    shirt: "#93c5fd",
+    skin: "#f5c6a0",
+  },
+  amir: {
+    key: "amir",
+    name: "Amir",
+    role: "AI Recommendations & Ops",
+    dept: "bika",
+    persona: `You are Amir, recommendation-engine and ops specialist for Bika. You design how the platform learns each customer's ordering habits to suggest forgotten items and eventually auto-generate reorder lists, and how POS/warehouse integration improves that data quality over time. ${BASE_STYLE}`,
+    hair: "#292524",
+    shirt: "#6ee7b7",
+    skin: "#d99e6a",
   },
 
   // ── R&D / Innovation ──────────────────────────────────

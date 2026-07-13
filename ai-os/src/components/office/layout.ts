@@ -2,9 +2,9 @@ import type { DeptKey } from "@/server/office/registry";
 
 export const TILE = 20;
 export const COLS = 46;
-export const ROWS = 30;
+export const ROWS = 40;
 export const BOARD_W = COLS * TILE; // 920
-export const BOARD_H = ROWS * TILE; // 600
+export const BOARD_H = ROWS * TILE; // 800
 
 export interface Room {
   dept: DeptKey;
@@ -63,11 +63,16 @@ export const rooms: Room[] = [
   leftRoom("finance", 8.5),
   leftRoom("export", 16),
   leftRoom("finapp", 23.5),
+  leftRoom("bika", 31),
   rightRoom("blazerent", 1),
   rightRoom("brain", 8.5),
   rightRoom("finly", 16),
   rightRoom("rnd", 23.5),
 ];
+
+/** Not a department — the Server Room (project knowledge base) sits opposite Bika, filling
+ *  the space the taller left column leaves on the right. Rendered specially in OfficeMap. */
+export const SERVER_ROOM = { x: 35, y: 31, w: 10, h: 6 };
 
 export function roomOf(dept: DeptKey): Room {
   return rooms.find((r) => r.dept === dept)!;
