@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { sql } from "@/server/db";
+import { notifyTaskFinished } from "@/server/telegram/handlers";
 import { departments, deptWorkers, workers, type DeptKey } from "./registry";
 import { PORTFOLIO_CONTEXT } from "./context";
 import { generate, generateJson } from "./llm";
@@ -109,8 +110,10 @@ export async function runTask(taskId: string): Promise<void> {
 
     await setTask(taskId, { status: "done", result });
     await emit(taskId, `Deliverable ready. ${dept.name} team heading to the coffee corner ☕`, lead.key);
+    await notifyTaskFinished(taskId).catch(() => {});
   } catch (e) {
     await setTask(taskId, { status: "failed", error: String(e) });
     await emit(taskId, `Task failed: ${String(e).slice(0, 200)}`);
+    await notifyTaskFinished(taskId).catch(() => {});
   }
 }

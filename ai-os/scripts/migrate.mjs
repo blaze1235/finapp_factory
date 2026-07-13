@@ -71,6 +71,22 @@ await sql`
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
 
+await sql`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+  )`;
+
+await sql`
+  CREATE TABLE IF NOT EXISTS reports (
+    id TEXT PRIMARY KEY,
+    week_start DATE NOT NULL,
+    department TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(week_start, department)
+  )`;
+
 await sql`CREATE INDEX IF NOT EXISTS idx_subtasks_task ON subtasks(task_id)`;
 await sql`CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id)`;
 await sql`CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC)`;

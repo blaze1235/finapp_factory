@@ -52,7 +52,7 @@ const WRITE_KEYWORDS = /\b(insert|update|delete|drop|alter|truncate|grant|revoke
  * Runs a read-only SELECT against a connected app's database. Rejects anything that isn't a
  * plain SELECT (defense in depth — the DB user itself should also be provisioned read-only).
  */
-export async function readonlyQuery(source: SourceKey, query: string, limit = 200) {
+export async function readonlyQuery(source: SourceKey, query: string, limit = 200): Promise<Record<string, unknown>[]> {
   if (!isConfigured(source)) throw new Error(`${source} is not connected yet — no ${ENV_VAR[source]} set`);
   const trimmed = query.trim().replace(/;+\s*$/, "");
   if (!/^(select|with)\b/i.test(trimmed)) throw new Error("Only SELECT (or WITH ... SELECT) queries are allowed");
