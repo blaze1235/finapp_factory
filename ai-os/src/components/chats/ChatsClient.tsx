@@ -8,12 +8,13 @@ import { departments, workers, type DeptKey } from "@/server/office/registry";
 
 interface ChatRow {
   id: string;
-  scope: "office" | "dept" | "dm";
+  scope: "office" | "dept" | "dm" | "collab";
   department: string | null;
   worker_key: string | null;
   title: string;
   busy: boolean;
   updated_at: string;
+  participants?: string[];
 }
 
 interface Msg {
@@ -32,6 +33,7 @@ export default function ChatsClient() {
   const [creating, setCreating] = useState(false);
   const [newScope, setNewScope] = useState<string>("office");
   const [newTitle, setNewTitle] = useState("");
+  const [collabPicks, setCollabPicks] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastCount = useRef(0);
   const params = useSearchParams();
@@ -110,6 +112,32 @@ export default function ChatsClient() {
     }
   }
 
+  async function createCollab() {
+    if (collabPicks.size < 2) return;
+    const res = await fetch("/api/chats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "collab", participants: [...collabPicks], title: newTitle }),
+    });
+    if (res.ok) {
+      const { id } = await res.json();
+      await loadChats();
+      setActiveId(id);
+      setCreating(false);
+      setNewTitle("");
+      setCollabPicks(new Set());
+    }
+  }
+
+  function toggleCollabPick(key: string) {
+    setCollabPicks((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   async function send() {
     if (!activeId || !input.trim() || busy) return;
     const content = input.trim();
@@ -128,13 +156,14 @@ export default function ChatsClient() {
   const officeChats = chats.filter((c) => c.scope === "office");
   const deptChats = chats.filter((c) => c.scope === "dept");
   const dmChats = chats.filter((c) => c.scope === "dm");
+  const collabChats = chats.filter((c) => c.scope === "collab");
   const leadKeys = Object.values(departments).map((d) => d.lead);
 
   return (
     <div className="flex h-full">
       {/* chat list */}
       <aside
-        className={`${activeId ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel)] md:w-[250px]`}
+        className={`${activeId ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel)] md:w-[260px]`}
       >
         <div className="flex items-center justify-between px-4 pb-2 pt-4">
           <span className="font-pixel text-[8px] tracking-wider text-[var(--muted)]">CHATS</span>
@@ -150,10 +179,14 @@ export default function ChatsClient() {
           <div className="mx-3 mb-2 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
             <select
               value={newScope}
-              onChange={(e) => setNewScope(e.target.value)}
+              onChange={(e) => {
+                setNewScope(e.target.value);
+                setCollabPicks(new Set());
+              }}
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-xs outline-none"
             >
               <option value="office">🏢 Office · All-hands collab</option>
+              <option value="collab">🤝 Collab room · pick 2+ people</option>
               <option value="dm">🧑‍💼 Direct message…</option>
               {Object.values(departments).map((d) => (
                 <option key={d.key} value={d.key}>
@@ -161,6 +194,7 @@ export default function ChatsClient() {
                 </option>
               ))}
             </select>
+
             {newScope === "dm" ? (
               <select
                 onChange={(e) => e.target.value && openDm(e.target.value)}
@@ -182,6 +216,39 @@ export default function ChatsClient() {
                   </optgroup>
                 ))}
               </select>
+            ) : newScope === "collab" ? (
+              <>
+                <input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="Room name, e.g. BlazeRent Forecast"
+                  className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-xs outline-none focus:border-[var(--accent)]"
+                />
+                <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
+                  {Object.values(departments).map((d) => (
+                    <div key={d.key} className="mb-1.5">
+                      <p className="mb-0.5 text-[9px] font-semibold" style={{ color: d.accent }}>
+                        {d.name}
+                      </p>
+                      {Object.values(workers)
+                        .filter((w) => w.dept === d.key)
+                        .map((w) => (
+                          <label key={w.key} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[11px] hover:bg-[var(--panel-2)]">
+                            <input type="checkbox" checked={collabPicks.has(w.key)} onChange={() => toggleCollabPick(w.key)} />
+                            {w.name} <span className="text-[var(--muted)]">— {w.role}</span>
+                          </label>
+                        ))}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={createCollab}
+                  disabled={collabPicks.size < 2}
+                  className="mt-2 w-full rounded-lg bg-[var(--accent)] py-1.5 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-40"
+                >
+                  Create room ({collabPicks.size} picked)
+                </button>
+              </>
             ) : (
               <>
                 <input
@@ -233,6 +300,14 @@ export default function ChatsClient() {
             <ChatItem key={c.id} chat={c} active={c.id === activeId} onClick={() => setActiveId(c.id)} />
           ))}
 
+          <p className="px-1 py-2 text-[10px] font-semibold tracking-wide text-[var(--muted)]">🤝 COLLAB ROOMS</p>
+          {collabChats.map((c) => (
+            <ChatItem key={c.id} chat={c} active={c.id === activeId} onClick={() => setActiveId(c.id)} />
+          ))}
+          {collabChats.length === 0 && (
+            <p className="px-1 text-[11px] text-[var(--muted)]">Pick 2+ specialists across departments — a standing room for them.</p>
+          )}
+
           <p className="px-1 py-2 text-[10px] font-semibold tracking-wide text-[var(--muted)]">🏢 OFFICE COLLABS</p>
           {officeChats.map((c) => (
             <ChatItem key={c.id} chat={c} active={c.id === activeId} onClick={() => setActiveId(c.id)} />
@@ -257,15 +332,19 @@ export default function ChatsClient() {
               >
                 ←
               </button>
-              <span className="text-base">{active.scope === "office" ? "🏢" : active.scope === "dm" ? "🧑‍💼" : "👥"}</span>
-              <div>
+              <span className="text-base">
+                {active.scope === "office" ? "🏢" : active.scope === "dm" ? "🧑‍💼" : active.scope === "collab" ? "🤝" : "👥"}
+              </span>
+              <div className="min-w-0">
                 <h1 className="text-sm font-semibold">{active.title}</h1>
-                <p className="text-[11px] text-[var(--muted)]">
+                <p className="truncate text-[11px] text-[var(--muted)]">
                   {active.scope === "office"
                     ? "All-hands collab — relevant agents join the discussion"
                     : active.scope === "dm"
                       ? `${workers[active.worker_key ?? ""]?.role ?? ""} · ${departments[workers[active.worker_key ?? ""]?.dept as DeptKey]?.name ?? ""}`
-                      : departments[active.department as DeptKey]?.name}
+                      : active.scope === "collab"
+                        ? (active.participants ?? []).map((k) => workers[k]?.name).filter(Boolean).join(", ")
+                        : departments[active.department as DeptKey]?.name}
                 </p>
               </div>
               {busy && (
@@ -304,7 +383,9 @@ export default function ChatsClient() {
                       ? "Pitch an idea — finance, research, product will weigh in…"
                       : active.scope === "dm"
                         ? `Message ${active.title}…`
-                        : "Message the team…"
+                        : active.scope === "collab"
+                          ? "Message the room — everyone here weighs in…"
+                          : "Message the team…"
                   }
                   className="flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3.5 py-2.5 text-xs outline-none focus:border-[var(--accent)]"
                 />
@@ -323,8 +404,8 @@ export default function ChatsClient() {
             <span className="text-3xl">💬</span>
             <p className="text-sm text-[var(--muted)]">Pick a chat or create one.</p>
             <p className="max-w-xs text-[11px] text-[var(--muted)]">
-              Your Office holds 1:1s with team leads. Office collabs pull agents from every relevant department to
-              debate your idea. Department chats are project channels — one per topic.
+              Your Office holds 1:1s with leads. Collab rooms are a standing group of specialists across departments
+              (e.g. Lina + Max). Office collabs auto-pick a fresh team per idea. Department chats are project channels.
             </p>
           </div>
         )}
@@ -336,7 +417,12 @@ export default function ChatsClient() {
 function ChatItem({ chat, active, onClick }: { chat: ChatRow; active: boolean; onClick: () => void }) {
   const w = chat.worker_key ? workers[chat.worker_key] : null;
   const dept = w ? departments[w.dept] : chat.department ? departments[chat.department as DeptKey] : null;
-  const subtitle = chat.scope === "dm" ? w?.role ?? "Direct message" : dept?.name ?? "Office";
+  const subtitle =
+    chat.scope === "dm"
+      ? w?.role ?? "Direct message"
+      : chat.scope === "collab"
+        ? (chat.participants ?? []).map((k) => workers[k]?.name).filter(Boolean).join(", ") || "Collab room"
+        : dept?.name ?? "Office";
   return (
     <button
       onClick={onClick}
@@ -350,7 +436,7 @@ function ChatItem({ chat, active, onClick }: { chat: ChatRow; active: boolean; o
       />
       <span className="min-w-0">
         <span className="block truncate text-xs">{chat.title}</span>
-        <span className="block text-[10px]" style={{ color: dept?.accent ?? "var(--muted)" }}>
+        <span className="block truncate text-[10px]" style={{ color: dept?.accent ?? "var(--muted)" }}>
           {subtitle}
         </span>
       </span>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { departments, deptWorkers, type DeptKey } from "@/server/office/registry";
 
@@ -21,6 +22,9 @@ const DEPT_SOURCE: Partial<Record<DeptKey, "blazerent" | "finly" | "bika">> = {
 export default function AgentsClient() {
   const [working, setWorking] = useState<Set<string>>(new Set());
   const [dataStatus, setDataStatus] = useState<Record<string, boolean>>({});
+  const [gmail, setGmail] = useState<{ connected: boolean; configured: boolean } | null>(null);
+  const params = useSearchParams();
+  const gmailResult = params.get("gmail");
 
   useEffect(() => {
     const poll = async () => {
@@ -45,16 +49,39 @@ export default function AgentsClient() {
       .then((r) => r.json())
       .then(setDataStatus)
       .catch(() => {});
+    fetch("/api/gmail/status")
+      .then((r) => r.json())
+      .then(setGmail)
+      .catch(() => {});
     return () => clearInterval(t);
   }, []);
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="border-b border-[var(--border)] px-5 py-3.5">
-        <h1 className="text-sm font-semibold">🧑‍💻 AI Agents</h1>
-        <p className="text-[11px] text-[var(--muted)]">
-          {Object.values(departments).length} departments · 26 specialists. Click a team to open its chat.
-        </p>
+      <header className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-5 py-3.5">
+        <div>
+          <h1 className="text-sm font-semibold">🧑‍💻 AI Agents</h1>
+          <p className="text-[11px] text-[var(--muted)]">
+            {Object.values(departments).length} departments · 26 specialists. Click a team to open its chat.
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          {gmailResult === "connected" && <span className="text-[11px] text-emerald-400">✅ Gmail connected</span>}
+          {gmailResult === "error" && <span className="text-[11px] text-red-400">⚠️ Gmail connection failed</span>}
+          {gmail?.connected ? (
+            <span className="rounded-full border border-emerald-600/40 px-2.5 py-1 text-[10px] text-emerald-400">
+              📧 Gmail connected
+            </span>
+          ) : (
+            <a
+              href="/api/gmail/connect"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white"
+              title={gmail && !gmail.configured ? "Needs GOOGLE_CLIENT_ID/SECRET set on the server first" : undefined}
+            >
+              📧 Connect Gmail
+            </a>
+          )}
+        </div>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <div className="space-y-6">

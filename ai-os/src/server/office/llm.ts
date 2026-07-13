@@ -14,6 +14,12 @@ const GROQ_MODEL_CHAIN = [
 // Only reasoning-capable models accept reasoning_format — llama-3.x rejects it with a 400.
 const REASONING_MODELS = new Set(["qwen/qwen3-32b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
 
+// Multiple free Groq accounts — each with its own quota. Tried in order; a rate limit on the
+// first key's models falls through to the second key's models before ever touching Gemini.
+function groqKeys(): string[] {
+  return [process.env.GROQ_API_KEY, process.env.GROQ_API_KEY_2].filter((k): k is string => !!k);
+}
+
 function providerOrder(): Provider[] {
   const env = process.env.LLM_PROVIDER;
   if (env) {
@@ -23,7 +29,7 @@ function providerOrder(): Provider[] {
       .filter((p): p is Provider => p === "groq" || p === "gemini");
   }
   const list: Provider[] = [];
-  if (process.env.GROQ_API_KEY) list.push("groq");
+  if (groqKeys().length) list.push("groq");
   if (process.env.GEMINI_API_KEY) list.push("gemini");
   return list.length ? list : ["groq"];
 }
@@ -33,11 +39,11 @@ function sleep(ms: number) {
 }
 
 // ── Groq (OpenAI-compatible REST) ─────────────────────
-async function groqCallOnce(model: string, system: string, user: string, json: boolean): Promise<string> {
+async function groqCallOnce(apiKey: string, model: string, system: string, user: string, json: boolean): Promise<string> {
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -68,23 +74,26 @@ function stripThinking(text: string): string {
   return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 }
 
-/** Tries every free Groq model in the chain before giving up. */
+/** Tries every free Groq model across every configured key before giving up. */
 async function groqCall(system: string, user: string, json: boolean): Promise<{ text: string; errors: string[] }> {
-  if (!process.env.GROQ_API_KEY) return { text: "", errors: ["Groq: GROQ_API_KEY not set"] };
+  const keys = groqKeys();
+  if (keys.length === 0) return { text: "", errors: ["Groq: no GROQ_API_KEY set"] };
   const errors: string[] = [];
-  for (const model of GROQ_MODEL_CHAIN) {
-    try {
-      const out = await groqCallOnce(model, system, user, json);
-      if (out && out.trim()) return { text: out, errors };
-      errors.push(`${model}: empty response`);
-    } catch (e) {
-      const status = (e as Error & { status?: number }).status;
-      errors.push(`${model}: ${status ?? "?"} ${String((e as Error).message).slice(0, 100)}`);
-      if (status === 429) {
-        // brief backoff, then let the loop try the NEXT model (different bucket)
-        await sleep(400);
+  for (let k = 0; k < keys.length; k++) {
+    for (const model of GROQ_MODEL_CHAIN) {
+      try {
+        const out = await groqCallOnce(keys[k], model, system, user, json);
+        if (out && out.trim()) return { text: out, errors };
+        errors.push(`key${k + 1}/${model}: empty response`);
+      } catch (e) {
+        const status = (e as Error & { status?: number }).status;
+        errors.push(`key${k + 1}/${model}: ${status ?? "?"} ${String((e as Error).message).slice(0, 100)}`);
+        if (status === 429) {
+          // brief backoff, then let the loop try the NEXT model (different bucket)
+          await sleep(400);
+        }
+        // non-rate-limit error: still try the next model rather than aborting
       }
-      // non-rate-limit error: still try the next model rather than aborting
     }
   }
   return { text: "", errors };

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { departments, type DeptKey } from "@/server/office/registry";
+import TeamMemoryPanel from "./TeamMemoryPanel";
 
 interface Note {
   id: string;
@@ -158,6 +159,7 @@ export default function NotesGraph() {
 
   return (
     <div className="flex h-screen">
+      <TeamMemoryPanel />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="border-b border-[var(--border)] px-5 py-3.5">
           <h1 className="text-sm font-semibold">🕸️ Brain Net</h1>

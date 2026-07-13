@@ -1,24 +1,11 @@
 import { sql } from "@/server/db";
-import { departments, workers, type DeptKey, type Worker } from "./registry";
+import { departments, workers, type DeptKey } from "./registry";
 import { PORTFOLIO_CONTEXT } from "./context";
 import { generate, generateJson } from "./llm";
 import { beginCollab, endCollab } from "./simEngine";
-import { snapshot as blazerentSnapshot } from "@/server/datasources/blazerent";
-import { appSnapshot as finlyAppSnapshot, personalSnapshot as finlyPersonalSnapshot } from "@/server/datasources/finly";
+import { GROUNDING, liveDataFor, knowledgeFor } from "./grounding";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Real live-data grounding for a worker, if their department has a connected source. No-op until configured. */
-async function liveDataFor(w: Worker): Promise<string> {
-  let data: string | null = null;
-  if (w.dept === "blazerent") data = await blazerentSnapshot();
-  else if (w.dept === "finly") data = await finlyAppSnapshot();
-  else if (w.dept === "finance") data = await finlyPersonalSnapshot();
-  return data ? `\n\n${data}` : "";
-}
-
-const GROUNDING =
-  "HARD RULE on numbers: never invent statistics, market sizes, revenue figures or user counts. The ONLY numbers you may state as fact are (a) from a LIVE data block in this prompt, or (b) ones Abdulaziz himself gave in the conversation. If the data you need isn't available, say exactly what's missing and ask Abdulaziz for it — a good clarifying question beats a made-up figure. Clearly label any estimate as an assumption.";
 
 const CHAT_STYLE =
   "This is a live office chat, not a report. Reply as yourself in 40-140 words, conversational but substantive. React to what others said (agree, push back, add numbers). No headings, no sign-offs. Plain text or light markdown (bold, short lists) only.";
@@ -79,7 +66,7 @@ export async function runDeptReply(chatId: string): Promise<void> {
     }
 
     const reply = await generate(
-      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}\nYou are chatting in the "${chat.title}" channel of the ${dept.name} room. ${GROUNDING} ${CHAT_STYLE}`,
+      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}${await knowledgeFor(lastUser)}\nYou are chatting in the "${chat.title}" channel of the ${dept.name} room. ${GROUNDING} ${CHAT_STYLE}`,
       `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
     );
     await addMessage(chatId, speaker.key, reply);
@@ -98,12 +85,62 @@ export async function runDmReply(chatId: string): Promise<void> {
     if (!speaker) return;
     const msgs = (await sql`SELECT role, worker_key, content FROM messages
                             WHERE chat_id = ${chatId} ORDER BY id DESC LIMIT 24`).reverse() as unknown as MsgRow[];
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user")?.content ?? "";
 
     const reply = await generate(
-      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}\n${GROUNDING} ${DM_STYLE}`,
+      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}${await knowledgeFor(lastUser)}\n${GROUNDING} ${DM_STYLE}`,
       `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
     );
     await addMessage(chatId, speaker.key, reply);
+  } catch (e) {
+    await addMessage(chatId, null, `⚠️ Reply failed: ${String(e).slice(0, 180)}`);
+  } finally {
+    await setBusy(chatId, false);
+  }
+}
+
+/**
+ * Persistent multi-agent collab room: a fixed roster picked by Abdulaziz once (e.g. Lina +
+ * Max, or the whole BlazeRent + Marketing pairing), standing across many messages — unlike
+ * office collabs, which pick a fresh ad-hoc roster per idea. Every member weighs in on each
+ * message, building on the others, so specialists from different departments actually work
+ * off each other's numbers.
+ */
+export async function runCollabReply(chatId: string): Promise<void> {
+  try {
+    const participantRows = await sql`SELECT worker_key FROM chat_participants WHERE chat_id = ${chatId}`;
+    const participantKeys = (participantRows as unknown as { worker_key: string }[])
+      .map((r) => r.worker_key)
+      .filter((k) => workers[k]);
+    if (participantKeys.length < 2) return;
+
+    const [chat] = await sql`SELECT * FROM chats WHERE id = ${chatId}`;
+    const msgs = (await sql`SELECT role, worker_key, content FROM messages
+                            WHERE chat_id = ${chatId} ORDER BY id DESC LIMIT 24`).reverse() as unknown as MsgRow[];
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user")?.content ?? "";
+    const knowledge = await knowledgeFor(lastUser);
+
+    // whoever was addressed by name speaks first; the rest follow and build on it
+    const addressed = participantKeys.find((k) => new RegExp(`\\b${workers[k].name}\\b`, "i").test(lastUser));
+    const order = addressed ? [addressed, ...participantKeys.filter((k) => k !== addressed)] : participantKeys;
+    const roomLabel = order.map((k) => `${workers[k].name} (${workers[k].role}, ${departments[workers[k].dept].name})`).join(", ");
+
+    beginCollab(order);
+    try {
+      const running: MsgRow[] = [...msgs];
+      for (const key of order) {
+        const w = workers[key];
+        const text = await generate(
+          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}${knowledge}\nYou're in a standing collab room called "${chat.title}" with: ${roomLabel}. Build on what your roommates just said in this same turn — don't repeat them, add your specialty's angle. ${GROUNDING} ${CHAT_STYLE}`,
+          `Conversation so far:\n\n${transcript(running)}\n\nSpeak now as ${w.name}.`,
+        );
+        await addMessage(chatId, key, text);
+        running.push({ role: "agent", worker_key: key, content: text });
+        await sleep(300);
+      }
+    } finally {
+      endCollab(order);
+    }
   } catch (e) {
     await addMessage(chatId, null, `⚠️ Reply failed: ${String(e).slice(0, 180)}`);
   } finally {
@@ -121,13 +158,14 @@ export async function runOfficeCollab(chatId: string): Promise<void> {
     const msgs = (await sql`SELECT role, worker_key, content FROM messages
                             WHERE chat_id = ${chatId} ORDER BY id DESC LIMIT 30`).reverse() as unknown as MsgRow[];
     const lastUser = [...msgs].reverse().find((m) => m.role === "user")?.content ?? "";
+    const knowledge = await knowledgeFor(lastUser);
 
     const roster = Object.values(workers)
       .map((w) => `"${w.key}" — ${w.name}, ${w.role} (${departments[w.dept].name})`)
       .join("\n");
 
     const plan = await generateJson<CollabPlan>(
-      `You are the Master Orchestrator of Abdulaziz's AI OS. He just dropped an idea/question in the all-hands office chat. Pick the RIGHT people across departments to discuss it — like pulling chairs to a table.\n${PORTFOLIO_CONTEXT}`,
+      `You are the Master Orchestrator of Abdulaziz's AI OS. He just dropped an idea/question in the all-hands office chat. Pick the RIGHT people across departments to discuss it — like pulling chairs to a table.\n${PORTFOLIO_CONTEXT}${knowledge}`,
       `His message:\n"""${lastUser}"""\n\nPrior discussion:\n${transcript(msgs.slice(0, -1)) || "(none)"}\n\nRoster:\n${roster}\n\nPick 3-6 workers from DIFFERENT relevant departments (finance perspective almost always useful for business ideas; add market/research, product, and execution angles). Order them so the discussion builds. Return JSON: {"participants":[{"worker":"<key>","angle":"what this person should examine (feasibility, cost, market fit, risks, growth...)"}]}`,
     );
 
@@ -143,7 +181,7 @@ export async function runOfficeCollab(chatId: string): Promise<void> {
       for (const p of picked) {
         const w = workers[p.worker];
         const text = await generate(
-          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}\nYou were pulled into the all-hands office chat to discuss the boss's idea. Your angle: ${p.angle}. Be honest — if the numbers don't work, say so; if data is missing, name it and ask. ${GROUNDING} ${CHAT_STYLE}`,
+          `${w.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(w)}${knowledge}\nYou were pulled into the all-hands office chat to discuss the boss's idea. Your angle: ${p.angle}. Be honest — if the numbers don't work, say so; if data is missing, name it and ask. ${GROUNDING} ${CHAT_STYLE}`,
           `Discussion so far:\n\n${transcript(running)}\n\nSpeak now as ${w.name}.`,
         );
         await addMessage(chatId, w.key, text);

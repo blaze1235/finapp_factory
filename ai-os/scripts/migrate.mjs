@@ -87,6 +87,34 @@ await sql`
     UNIQUE(week_start, department)
   )`;
 
+await sql`
+  CREATE TABLE IF NOT EXISTS memories (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    source_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+
+await sql`
+  CREATE TABLE IF NOT EXISTS documents (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    content TEXT NOT NULL,
+    size_bytes INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+
+await sql`
+  CREATE TABLE IF NOT EXISTS chat_participants (
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    worker_key TEXT NOT NULL,
+    PRIMARY KEY (chat_id, worker_key)
+  )`;
+
+await sql`CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories USING GIN (to_tsvector('english', content))`;
+await sql`CREATE INDEX IF NOT EXISTS idx_documents_fts ON documents USING GIN (to_tsvector('english', content))`;
+await sql`CREATE INDEX IF NOT EXISTS idx_tasks_fts ON tasks USING GIN (to_tsvector('english', coalesce(title,'') || ' ' || coalesce(result,'')))`;
+
 await sql`CREATE INDEX IF NOT EXISTS idx_subtasks_task ON subtasks(task_id)`;
 await sql`CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id)`;
 await sql`CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC)`;
