@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { departments, deptWorkers, workers, type DeptKey } from "@/server/office/registry";
+import { departments, deptWorkers, orgUnit, projects, workerProjects, workers } from "@/server/office/registry";
 
 interface ActiveTask {
   id: string;
@@ -12,16 +12,8 @@ interface ActiveTask {
   subtasks: { worker: string; status: string }[];
 }
 
-// which department maps to which of the user's other apps, for the live-data badge
-const DEPT_SOURCE: Partial<Record<DeptKey, "blazerent" | "finly" | "bika">> = {
-  blazerent: "blazerent",
-  finly: "finly",
-  bika: "bika",
-};
-
 export default function AgentsClient() {
   const [working, setWorking] = useState<Set<string>>(new Set());
-  const [dataStatus, setDataStatus] = useState<Record<string, boolean>>({});
   const [gmail, setGmail] = useState<{ connected: boolean; configured: boolean } | null>(null);
   const params = useSearchParams();
   const gmailResult = params.get("gmail");
@@ -36,7 +28,7 @@ export default function AgentsClient() {
         for (const t of (d.active ?? []) as ActiveTask[]) {
           for (const s of t.subtasks) if (s.status === "working") w.add(s.worker);
           if (t.status === "synthesizing") {
-            const lead = departments[t.department as keyof typeof departments]?.lead;
+            const lead = orgUnit(t.department)?.lead;
             if (lead) w.add(lead);
           }
         }
@@ -45,10 +37,6 @@ export default function AgentsClient() {
     };
     poll();
     const t = setInterval(poll, 4000);
-    fetch("/api/datasources/status")
-      .then((r) => r.json())
-      .then(setDataStatus)
-      .catch(() => {});
     fetch("/api/gmail/status")
       .then((r) => r.json())
       .then(setGmail)
@@ -62,7 +50,8 @@ export default function AgentsClient() {
         <div>
           <h1 className="text-sm font-semibold">🧑‍💻 AI Agents</h1>
           <p className="text-[11px] text-[var(--muted)]">
-            {Object.values(departments).length} departments · {Object.keys(workers).length} specialists. Click a team to open its chat.
+            {Object.values(departments).length} permanent departments · {Object.keys(workers).length} specialists ·{" "}
+            {Object.values(projects).length} projects. An agent lives in ONE department and can work on many projects.
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -95,22 +84,6 @@ export default function AgentsClient() {
                     {dept.name}
                   </h2>
                   <span className="text-[10px] text-[var(--muted)]">{dept.description}</span>
-                  {DEPT_SOURCE[dept.key] && (
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[9px] ${
-                        dataStatus[DEPT_SOURCE[dept.key]!]
-                          ? "border-emerald-600/40 text-emerald-400"
-                          : "border-[var(--border)] text-[var(--muted)]"
-                      }`}
-                      title={
-                        dataStatus[DEPT_SOURCE[dept.key]!]
-                          ? "Live read-only database connected"
-                          : "No live data connected yet — ask Claude to wire it up once you share a read-only connection string"
-                      }
-                    >
-                      {dataStatus[DEPT_SOURCE[dept.key]!] ? "🔌 live data" : "⚪ no live data"}
-                    </span>
-                  )}
                   <Link
                     href={`/chats?dept=${dept.key}`}
                     className="ml-auto rounded-lg border border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white"
@@ -148,6 +121,20 @@ export default function AgentsClient() {
                             />
                             <span className="text-[var(--muted)]">{busy ? "working" : "available"}</span>
                           </p>
+                          {workerProjects(w.key).length > 0 && (
+                            <p className="mt-1 flex flex-wrap gap-1">
+                              {workerProjects(w.key).map((p) => (
+                                <span
+                                  key={p.key}
+                                  className="rounded-full px-1.5 py-px text-[8px]"
+                                  style={{ background: `${p.accent}22`, color: p.accent }}
+                                  title={`Working on ${p.name}${p.lead === w.key ? " (project lead)" : ""}`}
+                                >
+                                  {p.lead === w.key ? "★ " : ""}{p.name}
+                                </span>
+                              ))}
+                            </p>
+                          )}
                         </div>
                       </div>
                     );

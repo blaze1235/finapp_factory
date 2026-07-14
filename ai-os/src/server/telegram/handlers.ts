@@ -1,5 +1,5 @@
 import { sql } from "@/server/db";
-import { departments, deptWorkers, workers, type DeptKey } from "@/server/office/registry";
+import { departments, orgUnit, projects, unitWorkers, workers } from "@/server/office/registry";
 import { createTask, runTask } from "@/server/office/orchestrator";
 import { sendMessage, answerCallback, type InlineButton } from "./api";
 
@@ -49,10 +49,15 @@ export async function handleUpdate(update: any): Promise<void> {
   }
 
   if (text.startsWith("/team")) {
-    const rows: InlineButton[][] = Object.values(departments).map((d) => [
-      { text: `${d.name} (${deptWorkers(d.key).length})`, callback_data: `team:${d.key}` },
-    ]);
-    await sendMessage(chatId, "*Departments* — tap one to see the team:", rows);
+    const rows: InlineButton[][] = [
+      ...Object.values(departments).map((d) => [
+        { text: `🏛 ${d.name} (${unitWorkers(d.key).length})`, callback_data: `team:${d.key}` },
+      ]),
+      ...Object.values(projects).map((p) => [
+        { text: `🚀 ${p.name} squad (${unitWorkers(p.key).length})`, callback_data: `team:${p.key}` },
+      ]),
+    ];
+    await sendMessage(chatId, "*Departments & Projects* — tap one to see the team:", rows);
     return;
   }
 
@@ -65,7 +70,7 @@ export async function handleUpdate(update: any): Promise<void> {
     const lines = (tasks as unknown as { title: string; department: string; status: string }[])
       .map((t) => {
         const icon = t.status === "done" ? "✅" : t.status === "failed" ? "❌" : "⏳";
-        const dept = departments[t.department as DeptKey]?.name ?? "routing…";
+        const dept = orgUnit(t.department)?.name ?? "routing…";
         return `${icon} *${t.title}* — ${dept}`;
       })
       .join("\n");
@@ -99,9 +104,9 @@ async function handleCallback(cb: any): Promise<void> {
   if (!chatId) return;
 
   if (data.startsWith("team:")) {
-    const dept = departments[data.slice(5) as DeptKey];
+    const dept = orgUnit(data.slice(5));
     if (!dept) return;
-    const team = deptWorkers(dept.key)
+    const team = unitWorkers(dept.key)
       .map((w) => `${dept.lead === w.key ? "⭐" : "•"} *${w.name}* — ${w.role}`)
       .join("\n");
     await sendMessage(chatId, `*${dept.name}*\n_${dept.description}_\n\n${team}`, [
@@ -116,7 +121,7 @@ export async function notifyTaskFinished(taskId: string): Promise<void> {
   if (!chatId) return;
   const [task] = await sql`SELECT title, department, status, result, error FROM tasks WHERE id = ${taskId}`;
   if (!task) return;
-  const dept = departments[task.department as DeptKey];
+  const dept = orgUnit(task.department);
   if (task.status === "done") {
     const excerpt = (task.result ?? "").replace(/[#*_`>]/g, "").slice(0, 500);
     await sendMessage(

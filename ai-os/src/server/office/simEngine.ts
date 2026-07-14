@@ -1,5 +1,5 @@
 import { sql } from "@/server/db";
-import { departments, deptWorkers, workers, type DeptKey, type Worker } from "./registry";
+import { deptWorkers, orgUnit, workers, type Worker } from "./registry";
 import { roomOf, roomAt, HANGOUTS } from "@/components/office/layout";
 
 interface P {
@@ -90,7 +90,9 @@ function deskSeat(w: Worker): P {
   const room = roomOf(w.dept);
   const idx = deptWorkers(w.dept).findIndex((t) => t.key === w.key);
   const [dx, dy] = room.desks[idx % room.desks.length];
-  return { x: dx + 0.85, y: dy + 1.55 };
+  // departments bigger than the desk count share desks — the overflow agent stands beside it
+  const overflow = Math.floor(idx / room.desks.length);
+  return { x: dx + 0.85 + overflow * 1.6, y: dy + 1.55 };
 }
 
 function near(a: P, b: P, eps = 0.4): boolean {
@@ -142,7 +144,7 @@ async function refreshWorking() {
     const set = new Set<string>();
     for (const r of rows as unknown as { worker_key: string }[]) set.add(r.worker_key);
     for (const r of synth as unknown as { department: string }[]) {
-      const lead = departments[r.department as DeptKey]?.lead;
+      const lead = orgUnit(r.department)?.lead;
       if (lead) set.add(lead);
     }
     e.workingSet = set;

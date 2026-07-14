@@ -5,7 +5,7 @@ import { sql } from "@/server/db";
 import { runDeptReply, runOfficeCollab, runDmReply, runCollabReply } from "@/server/office/collab";
 import { tryCaptureFromMessage } from "@/server/office/knowledge";
 import { tryHandleGmailCommand } from "@/server/office/gmailCommands";
-import { departments, type DeptKey } from "@/server/office/registry";
+import { orgUnit } from "@/server/office/registry";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // "email search: ..." / "draft email to ...: ..." — deterministic dispatch, no chat busy-state.
-  const speakerKey = chat.worker_key ?? (chat.department ? departments[chat.department as DeptKey]?.lead ?? null : null);
+  const speakerKey = chat.worker_key ?? orgUnit(chat.department)?.lead ?? null;
   const handledGmail = await tryHandleGmailCommand(trimmed, id, speakerKey);
   if (handledGmail) return NextResponse.json({ ok: true });
 

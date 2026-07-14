@@ -1,5 +1,5 @@
 import { sql } from "@/server/db";
-import { departments, workers, type DeptKey } from "./registry";
+import { departments, leadKeys, orgUnit, unitWorkers, workers } from "./registry";
 import { PORTFOLIO_CONTEXT } from "./context";
 import { generate, generateJson } from "./llm";
 import { beginCollab, endCollab } from "./simEngine";
@@ -46,27 +46,28 @@ async function setBusy(chatId: string, busy: boolean) {
   await sql`UPDATE chats SET busy = ${busy}, updated_at = now() WHERE id = ${chatId}`;
 }
 
-/** Department chat: the team lead answers; if the user addressed a teammate by name, that teammate answers. */
+/** Department or project chat: the unit's lead answers; if the user addressed a member by name, that member answers. */
 export async function runDeptReply(chatId: string): Promise<void> {
   try {
     const [chat] = await sql`SELECT * FROM chats WHERE id = ${chatId}`;
     if (!chat?.department) return;
-    const dept = departments[chat.department as DeptKey];
+    const unit = orgUnit(chat.department);
+    if (!unit) return;
     const msgs = (await sql`SELECT role, worker_key, content FROM messages
                             WHERE chat_id = ${chatId} ORDER BY id DESC LIMIT 24`).reverse() as unknown as MsgRow[];
     const lastUser = [...msgs].reverse().find((m) => m.role === "user")?.content ?? "";
 
-    // addressed teammate?
-    let speaker = workers[dept.lead];
-    for (const w of Object.values(workers)) {
-      if (w.dept === dept.key && w.key !== dept.lead && new RegExp(`\\b${w.name}\\b`, "i").test(lastUser)) {
+    // addressed teammate / squad member?
+    let speaker = workers[unit.lead];
+    for (const w of unitWorkers(unit.key)) {
+      if (w.key !== unit.lead && new RegExp(`\\b${w.name}\\b`, "i").test(lastUser)) {
         speaker = w;
         break;
       }
     }
 
     const reply = await generate(
-      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}${await projectContextFor(speaker)}${await knowledgeFor(lastUser)}\nYou are chatting in the "${chat.title}" channel of the ${dept.name} room. ${GROUNDING} ${CHAT_STYLE}`,
+      `${speaker.persona}\n${PORTFOLIO_CONTEXT}${await liveDataFor(speaker)}${await projectContextFor(speaker)}${await knowledgeFor(lastUser)}\nYou are chatting in the "${chat.title}" channel of the ${unit.name} ${unit.kind === "project" ? "project workspace" : "room"}. ${GROUNDING} ${CHAT_STYLE}`,
       `Conversation so far:\n\n${transcript(msgs)}\n\nReply now as ${speaker.name}.`,
     );
     await addMessage(chatId, speaker.key, reply);
@@ -160,7 +161,9 @@ export async function runOfficeCollab(chatId: string): Promise<void> {
     const lastUser = [...msgs].reverse().find((m) => m.role === "user")?.content ?? "";
     const knowledge = await knowledgeFor(lastUser);
 
-    const roster = Object.values(workers)
+    // Office chat is the leadership table: department leads + project leads only, never every specialist.
+    const roster = leadKeys()
+      .map((k) => workers[k])
       .map((w) => `"${w.key}" — ${w.name}, ${w.role} (${departments[w.dept].name})`)
       .join("\n");
 

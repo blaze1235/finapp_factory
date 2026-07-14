@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { sql } from "@/server/db";
-import { departments, workers } from "./registry";
+import { allUnits, unitWorkers, workers } from "./registry";
 import { generate } from "./llm";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -19,21 +19,19 @@ export async function getReports(weekStart: string) {
 }
 
 /**
- * One report per department lead, built ONLY from real recorded activity that week
- * (tasks + chat messages). Departments with zero activity get a fixed line — no LLM
- * call at all (free, and nothing to hallucinate about).
+ * One report per unit lead — every permanent department AND every project workspace —
+ * built ONLY from real recorded activity that week (tasks + chat messages). Units with
+ * zero activity get a fixed line — no LLM call at all (free, and nothing to hallucinate about).
  */
 export async function generateWeeklyReports(): Promise<void> {
   const week = currentWeekStart();
 
-  for (const dept of Object.values(departments)) {
+  for (const dept of allUnits()) {
     const tasks = await sql`
       SELECT title, status, result FROM tasks
       WHERE department = ${dept.key} AND created_at >= ${week}::date
       ORDER BY created_at`;
-    const teamKeys = Object.values(workers)
-      .filter((w) => w.dept === dept.key)
-      .map((w) => w.key);
+    const teamKeys = unitWorkers(dept.key).map((w) => w.key);
     const msgs = await sql`
       SELECT count(*)::int AS n FROM messages
       WHERE worker_key = ANY(${teamKeys}) AND created_at >= ${week}::date`;

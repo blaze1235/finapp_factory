@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { departments, workers, type DeptKey } from "@/server/office/registry";
+import { departments, orgUnit, projects, workers } from "@/server/office/registry";
 import OfficeMap, { type WorkerLive } from "./OfficeMap";
 import TaskDetail from "./TaskDetail";
 import { BOARD_W, BOARD_H } from "./layout";
@@ -77,7 +77,7 @@ export default function OfficeClient() {
           else if (s.status === "done" && !map[s.worker]) map[s.worker] = { status: "done" };
         }
         if (t.status === "synthesizing") {
-          const lead = departments[t.department as DeptKey]?.lead;
+          const lead = orgUnit(t.department)?.lead;
           if (lead) map[lead] = { status: "working" };
         }
       }
@@ -133,7 +133,7 @@ export default function OfficeClient() {
     <div className="flex h-screen flex-col overflow-hidden">
       {/* header */}
       <header className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-5 py-3">
-        <span className="text-xs text-[var(--muted)]">Office HQ · all 9 departments</span>
+        <span className="text-xs text-[var(--muted)]">Office HQ · 8 departments · 6 projects</span>
         <span className={`ml-1 h-2 w-2 rounded-full ${anyWorking ? "led-blink bg-amber-400" : "bg-emerald-500"}`} />
         <span className="hidden text-[10px] text-[var(--muted)] sm:inline">
           {anyWorking ? "team working" : "free time — agents hanging out"}
@@ -215,11 +215,20 @@ export default function OfficeClient() {
                 className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1.5 text-xs outline-none"
               >
                 <option value="auto">🎯 Auto-route</option>
-                {Object.values(departments).map((d) => (
-                  <option key={d.key} value={d.key}>
-                    {d.name}
-                  </option>
-                ))}
+                <optgroup label="🚀 Projects">
+                  {Object.values(projects).map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="🏛 Departments">
+                  {Object.values(departments).map((d) => (
+                    <option key={d.key} value={d.key}>
+                      {d.name}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
               <button
                 onClick={submit}
@@ -236,7 +245,7 @@ export default function OfficeClient() {
             <p className="px-1 pb-2 font-pixel text-[7px] tracking-wider text-[var(--muted)]">TASKS</p>
             <div className="space-y-1.5">
               {tasks.map((t) => {
-                const d = departments[t.department as DeptKey];
+                const d = orgUnit(t.department);
                 return (
                   <button
                     key={t.id}

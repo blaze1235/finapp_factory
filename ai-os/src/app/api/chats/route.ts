@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { isAuthed } from "@/server/auth";
 import { sql } from "@/server/db";
-import { departments, workers, type DeptKey } from "@/server/office/registry";
+import { orgUnit, workers } from "@/server/office/registry";
 
 export async function GET() {
   if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   }
 
   const isOffice = scope === "office";
-  if (!isOffice && !(department && departments[department as DeptKey])) {
+  if (!isOffice && !(department && orgUnit(department))) {
     return NextResponse.json({ error: "bad department" }, { status: 400 });
   }
   const name = typeof title === "string" && title.trim() ? title.trim().slice(0, 60) : isOffice ? "New idea" : "General";

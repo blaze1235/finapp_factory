@@ -59,20 +59,19 @@ function rightRoom(dept: DeptKey, y: number): Room {
 }
 
 export const rooms: Room[] = [
-  leftRoom("marketing", 1),
-  leftRoom("finance", 8.5),
-  leftRoom("export", 16),
-  leftRoom("finapp", 23.5),
-  leftRoom("bika", 31),
-  rightRoom("blazerent", 1),
-  rightRoom("brain", 8.5),
-  rightRoom("finly", 16),
-  rightRoom("rnd", 23.5),
+  leftRoom("exec", 1),
+  leftRoom("marketing", 8.5),
+  leftRoom("finance", 16),
+  leftRoom("ops", 23.5),
+  rightRoom("research", 1),
+  rightRoom("product", 8.5),
+  rightRoom("sales", 16),
+  rightRoom("brain", 23.5),
 ];
 
-/** Not a department — the Server Room (project knowledge base) sits opposite Bika, filling
- *  the space the taller left column leaves on the right. Rendered specially in OfficeMap. */
-export const SERVER_ROOM = { x: 35, y: 31, w: 10, h: 6 };
+/** Not a department — the Server Room (project knowledge base) sits bottom-center,
+ *  below the commons. Rendered specially in OfficeMap. */
+export const SERVER_ROOM = { x: 18, y: 32, w: 10, h: 6 };
 
 export function roomOf(dept: DeptKey): Room {
   return rooms.find((r) => r.dept === dept)!;

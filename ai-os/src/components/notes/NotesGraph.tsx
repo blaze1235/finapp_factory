@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { departments, type DeptKey } from "@/server/office/registry";
+import { orgUnit } from "@/server/office/registry";
 import TeamMemoryPanel from "./TeamMemoryPanel";
 
 interface Note {
@@ -49,11 +49,11 @@ export default function NotesGraph() {
 
   // build graph
   useEffect(() => {
-    const usedDepts = [...new Set(notes.map((n) => n.department))].filter((d) => departments[d as DeptKey]);
+    const usedDepts = [...new Set(notes.map((n) => n.department))].filter((d) => orgUnit(d));
     const ns: Node[] = [
       ...usedDepts.map((d, i) => ({
         id: `hub-${d}`,
-        label: departments[d as DeptKey].name,
+        label: orgUnit(d)!.name,
         kind: "hub" as const,
         dept: d,
         x: W / 2 + Math.cos((i / Math.max(usedDepts.length, 1)) * Math.PI * 2) * 180,
@@ -73,7 +73,7 @@ export default function NotesGraph() {
       })),
     ];
     const es: Edge[] = notes
-      .filter((n) => departments[n.department as DeptKey])
+      .filter((n) => orgUnit(n.department))
       .map((n) => ({ a: `hub-${n.department}`, b: n.id }));
     // wiki-links between notes: [[Title]] mentions or title inclusion
     for (const n of notes) {
@@ -196,7 +196,7 @@ export default function NotesGraph() {
                 );
               })}
               {nodes.map((n) => {
-                const accent = departments[n.dept as DeptKey]?.accent ?? "#818cf8";
+                const accent = orgUnit(n.dept)?.accent ?? "#818cf8";
                 const dim = hover && !neighbors.has(n.id);
                 return (
                   <g
@@ -237,11 +237,11 @@ export default function NotesGraph() {
               <span
                 className="rounded px-1.5 py-0.5 font-pixel text-[7px]"
                 style={{
-                  background: `${departments[selected.department as DeptKey]?.accent ?? "#818cf8"}22`,
-                  color: departments[selected.department as DeptKey]?.accent ?? "#818cf8",
+                  background: `${orgUnit(selected.department)?.accent ?? "#818cf8"}22`,
+                  color: orgUnit(selected.department)?.accent ?? "#818cf8",
                 }}
               >
-                {departments[selected.department as DeptKey]?.name.toUpperCase() ?? selected.department}
+                {orgUnit(selected.department)?.name.toUpperCase() ?? selected.department}
               </span>
               <h2 className="mt-1.5 text-sm font-semibold">{selected.title}</h2>
             </div>

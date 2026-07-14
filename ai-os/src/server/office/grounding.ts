@@ -1,5 +1,5 @@
 import { sql } from "@/server/db";
-import type { Worker } from "./registry";
+import { workerProjects, type Worker } from "./registry";
 import { snapshot as blazerentSnapshot } from "@/server/datasources/blazerent";
 import { appSnapshot as finlyAppSnapshot, personalSnapshot as finlyPersonalSnapshot } from "@/server/datasources/finly";
 import { searchKnowledge } from "./knowledge";
@@ -10,13 +10,25 @@ import { searchKnowledge } from "./knowledge";
 export const GROUNDING =
   "HARD RULE on numbers: you may state a specific number ONLY if it comes from (a) a LIVE data block above, (b) the TEAM KNOWLEDGE block above, or (c) something Abdulaziz said earlier in this exact conversation. If none of those give you the number you need, do NOT invent one — say plainly \"I don't have real numbers for that\" and either ask Abdulaziz for it or state a qualitative view without fake precision. This applies to revenue, users, market size, percentages, dates — everything. Violating this is worse than saying \"I don't know.\"";
 
-/** Real live-data grounding for a worker, if their department has a connected source. No-op until configured. */
+/** Real live-data grounding for a worker. Live sources follow SQUAD membership (an agent on the
+ *  BlazeRent squad gets BlazeRent numbers regardless of home department); the Finance department
+ *  additionally sees Abdulaziz's personal Finly numbers. No-op until configured. */
 export async function liveDataFor(w: Worker): Promise<string> {
-  let data: string | null = null;
-  if (w.dept === "blazerent") data = await blazerentSnapshot();
-  else if (w.dept === "finly") data = await finlyAppSnapshot();
-  else if (w.dept === "finance") data = await finlyPersonalSnapshot();
-  return data ? `\n\n${data}` : "";
+  const squads = new Set(workerProjects(w.key).map((p) => p.key));
+  const blocks: string[] = [];
+  if (squads.has("blazerent")) {
+    const d = await blazerentSnapshot();
+    if (d) blocks.push(d);
+  }
+  if (squads.has("finly")) {
+    const d = await finlyAppSnapshot();
+    if (d) blocks.push(d);
+  }
+  if (w.dept === "finance") {
+    const d = await finlyPersonalSnapshot();
+    if (d) blocks.push(d);
+  }
+  return blocks.length ? `\n\n${blocks.join("\n\n")}` : "";
 }
 
 /** Team memory + past-task deliverables relevant to what's being discussed right now. */
@@ -26,13 +38,15 @@ export async function knowledgeFor(query: string): Promise<string> {
 }
 
 /**
- * Live project definitions from the Server Room, for this worker's department. Abdulaziz edits
- * these directly (no AI involved) — this is what makes an edit there instantly visible to every
- * agent, replacing having to explain project context in conversation every time.
+ * Live project definitions from the Server Room, for every project this worker's squad
+ * membership covers (plus their home department's entries, e.g. BlazeStudio under marketing).
+ * Abdulaziz edits these directly (no AI involved) — this is what makes an edit there instantly
+ * visible to every agent, replacing having to explain project context in conversation every time.
  */
 export async function projectContextFor(w: Worker): Promise<string> {
   try {
-    const rows = await sql`SELECT name, purpose FROM projects WHERE department = ${w.dept} ORDER BY sort_order, name`;
+    const keys = [w.dept, ...workerProjects(w.key).map((p) => p.key)];
+    const rows = await sql`SELECT name, purpose FROM projects WHERE department = ANY(${keys}) ORDER BY sort_order, name`;
     const list = (rows as unknown as { name: string; purpose: string }[]).filter((r) => r.purpose.trim());
     if (list.length === 0) return "";
     const text = list.map((r) => `- **${r.name}**: ${r.purpose}`).join("\n");

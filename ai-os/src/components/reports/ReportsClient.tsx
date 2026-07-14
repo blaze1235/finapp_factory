@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { departments, workers, type DeptKey } from "@/server/office/registry";
+import { allUnits, workers } from "@/server/office/registry";
 
 interface Report {
   department: string;
@@ -22,7 +22,7 @@ export default function ReportsClient() {
       const d = await res.json();
       setWeek(d.week);
       setReports(d.reports ?? []);
-      if (generating && (d.reports?.length ?? 0) >= Object.keys(departments).length) setGenerating(false);
+      if (generating && (d.reports?.length ?? 0) >= allUnits().length) setGenerating(false);
     }
   }, [generating]);
 
@@ -73,7 +73,7 @@ export default function ReportsClient() {
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
-            {Object.values(departments).map((dept) => {
+            {allUnits().map((dept) => {
               const r = byDept[dept.key];
               const lead = workers[dept.lead];
               return (
@@ -87,7 +87,7 @@ export default function ReportsClient() {
                     </span>
                     <div>
                       <p className="text-xs font-semibold" style={{ color: dept.accent }}>
-                        {dept.name}
+                        {dept.kind === "project" ? "🚀 " : ""}{dept.name}
                       </p>
                       <p className="text-[10px] text-[var(--muted)]">
                         {lead.name} · {lead.role}

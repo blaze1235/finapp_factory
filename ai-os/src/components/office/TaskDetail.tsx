@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { workers, departments, type DeptKey } from "@/server/office/registry";
+import { workers, orgUnit } from "@/server/office/registry";
 
 interface Detail {
   task: {
@@ -42,7 +42,7 @@ export default function TaskDetail({ taskId, onClose }: { taskId: string; onClos
 
   if (!detail) return null;
   const { task, subtasks } = detail;
-  const dept = departments[task.department as DeptKey];
+  const dept = orgUnit(task.department);
   const accent = dept?.accent ?? "#818cf8";
 
   return (

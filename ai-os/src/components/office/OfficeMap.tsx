@@ -328,10 +328,11 @@ export default function OfficeMap({
               {anyActive && <span className="led-blink inline-block h-[6px] w-[6px] rounded-full" style={{ background: dept.accent }} />}
               {dept.name.toUpperCase()}
             </div>
-            {/* desks */}
-            {team.map((w, i) => {
-              const [dx, dy] = room.desks[i % room.desks.length];
-              return <Desk key={w.key} x={dx} y={dy + 0.55} accent={dept.accent} on={live[w.key]?.status === "working"} />;
+            {/* desks — one per slot; big departments share desks (agents fan out beside them) */}
+            {room.desks.map(([dx, dy], i) => {
+              const seated = team.filter((_, ti) => ti % room.desks.length === i);
+              const on = seated.some((w) => live[w.key]?.status === "working");
+              return <Desk key={`${room.dept}-${i}`} x={dx} y={dy + 0.55} accent={dept.accent} on={on} />;
             })}
           </div>
         );

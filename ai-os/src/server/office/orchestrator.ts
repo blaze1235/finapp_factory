@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { sql } from "@/server/db";
 import { notifyTaskFinished } from "@/server/telegram/handlers";
-import { departments, deptWorkers, workers, type DeptKey } from "./registry";
+import { allUnits, departments, orgUnit, unitWorkers, workers, type DeptKey, type ProjectKey } from "./registry";
 import { PORTFOLIO_CONTEXT } from "./context";
 import { generate, generateJson } from "./llm";
 import { GROUNDING, liveDataFor, knowledgeFor, projectContextFor } from "./grounding";
@@ -14,7 +14,7 @@ interface PlanSubtask {
 
 interface Plan {
   title: string;
-  department: DeptKey;
+  department: DeptKey | ProjectKey;
   subtasks: PlanSubtask[];
 }
 
@@ -34,7 +34,7 @@ async function setTask(taskId: string, fields: { status?: string; result?: strin
     WHERE id = ${taskId}`;
 }
 
-export async function createTask(brief: string, department?: DeptKey): Promise<string> {
+export async function createTask(brief: string, department?: DeptKey | ProjectKey): Promise<string> {
   const id = randomUUID();
   await sql`INSERT INTO tasks (id, title, brief, department, status)
             VALUES (${id}, ${brief.slice(0, 80)}, ${brief}, ${department ?? "auto"}, 'planning')`;
@@ -49,23 +49,33 @@ export async function runTask(taskId: string): Promise<void> {
     if (!task) return;
 
     // ── 1. Plan ────────────────────────────────────────
-    const deptList = Object.values(departments)
-      .map((d) => `- "${d.key}": ${d.name} — ${d.description}\n  workers: ${deptWorkers(d.key).map((w) => `"${w.key}" (${w.name}, ${w.role})`).join(", ")}`)
+    // Routable units: 6 project workspaces (mission squads) + 8 permanent skill departments.
+    const deptList = allUnits()
+      .map(
+        (u) =>
+          `- "${u.key}" (${u.kind === "project" ? "project squad" : "department"}): ${u.name} — ${u.description}\n  workers: ${unitWorkers(u.key)
+            .map((w) => `"${w.key}" (${w.name}, ${w.role})`)
+            .join(", ")}`,
+      )
       .join("\n");
 
-    const forced = task.department !== "auto" ? `The user pre-selected department "${task.department}". Use it.` : "Pick the single best department.";
+    const forced =
+      task.department !== "auto"
+        ? `The user pre-selected "${task.department}". Use it.`
+        : "Pick the single best unit — prefer a project squad when the brief is about that project, a department for skill-generic work.";
 
     const plan = await generateJson<Plan>(
       `You are the Master Orchestrator of Abdulaziz's AI OS. You dispatch work to departments of specialist agents.\n${PORTFOLIO_CONTEXT}`,
-      `Task brief:\n"""${task.brief}"""\n\nDepartments and workers:\n${deptList}\n\n${forced}\n\nDecompose the brief into 2-4 focused subtasks for DIFFERENT workers of that department (use each worker at most once; pick the most relevant workers). Keep the department lead for review — do NOT assign the lead a subtask unless the team is small.\n\nReturn JSON: {"title": "short task title (max 8 words)", "department": "<dept key>", "subtasks": [{"worker": "<worker key>", "title": "short subtask name", "instructions": "specific instructions for this worker"}]}`,
+      `Task brief:\n"""${task.brief}"""\n\nProject squads and departments (with their workers):\n${deptList}\n\n${forced}\n\nDecompose the brief into 2-4 focused subtasks for DIFFERENT workers of that unit (use each worker at most once; pick the most relevant workers). Keep the unit's lead for review — do NOT assign the lead a subtask unless the team is small.\n\nReturn JSON: {"title": "short task title (max 8 words)", "department": "<unit key>", "subtasks": [{"worker": "<worker key>", "title": "short subtask name", "instructions": "specific instructions for this worker"}]}`,
     );
 
-    const dept = departments[plan.department] ?? departments.brain;
-    const valid = plan.subtasks.filter((s) => workers[s.worker] && workers[s.worker].dept === dept.key);
+    const unit = orgUnit(plan.department) ?? { ...departments.brain, kind: "dept" as const };
+    const unitTeam = new Set(unitWorkers(unit.key).map((w) => w.key));
+    const valid = plan.subtasks.filter((s) => workers[s.worker] && unitTeam.has(s.worker));
     if (valid.length === 0) throw new Error("Planner produced no valid subtasks");
 
-    await setTask(taskId, { status: "working", title: plan.title, department: dept.key });
-    await emit(taskId, `Plan ready → ${dept.name} team, ${valid.length} subtasks. Team walking to their desks…`);
+    await setTask(taskId, { status: "working", title: plan.title, department: unit.key });
+    await emit(taskId, `Plan ready → ${unit.name} ${unit.kind === "project" ? "squad" : "team"}, ${valid.length} subtasks. Team walking to their desks…`);
 
     for (let i = 0; i < valid.length; i++) {
       const st = valid[i];
@@ -101,7 +111,7 @@ export async function runTask(taskId: string): Promise<void> {
     if (outputs.length === 0) throw new Error("All workers failed");
 
     // ── 3. Lead synthesizes ────────────────────────────
-    const lead = workers[dept.lead];
+    const lead = workers[unit.lead];
     await setTask(taskId, { status: "synthesizing" });
     await emit(taskId, `${lead.name} is assembling the final deliverable…`, lead.key);
 
@@ -111,7 +121,7 @@ export async function runTask(taskId: string): Promise<void> {
     );
 
     await setTask(taskId, { status: "done", result });
-    await emit(taskId, `Deliverable ready. ${dept.name} team heading to the coffee corner ☕`, lead.key);
+    await emit(taskId, `Deliverable ready. ${unit.name} ${unit.kind === "project" ? "squad" : "team"} heading to the coffee corner ☕`, lead.key);
     await notifyTaskFinished(taskId).catch(() => {});
   } catch (e) {
     await setTask(taskId, { status: "failed", error: String(e) });

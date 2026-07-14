@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { departments, type DeptKey } from "@/server/office/registry";
+import { allUnits, orgUnit } from "@/server/office/registry";
 
 interface ProjectFile {
   id: string;
@@ -103,8 +103,10 @@ export default function ServerRoomClient() {
     load();
   }
 
+  // Projects first, then departments — mirrors the new org hierarchy.
   const grouped: Record<string, Project[]> = { _none: [] };
-  for (const d of Object.values(departments)) grouped[d.key] = [];
+  const unitOrder = [...allUnits()].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "project" ? -1 : 1));
+  for (const d of unitOrder) grouped[d.key] = [];
   for (const p of projects) grouped[p.department ?? "_none"] = [...(grouped[p.department ?? "_none"] ?? []), p];
 
   return (
@@ -119,8 +121,8 @@ export default function ServerRoomClient() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <div className="space-y-6">
-          {[...Object.values(departments).map((d) => d.key), "_none"].map((deptKey) => {
-            const dept = deptKey === "_none" ? null : departments[deptKey as DeptKey];
+          {[...unitOrder.map((d) => d.key), "_none"].map((deptKey) => {
+            const dept = deptKey === "_none" ? null : orgUnit(deptKey);
             const list = grouped[deptKey] ?? [];
             if (list.length === 0 && deptKey === "_none") return null;
             return (
@@ -128,7 +130,7 @@ export default function ServerRoomClient() {
                 <div className="mb-2 flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-sm" style={{ background: dept?.accent ?? "#8b93b8" }} />
                   <h2 className="text-xs font-bold" style={{ color: dept?.accent ?? "#8b93b8" }}>
-                    {dept?.name ?? "Unassigned"}
+                    {dept ? `${dept.kind === "project" ? "🚀 " : "🏛 "}${dept.name}` : "Unassigned"}
                   </h2>
                   <button
                     onClick={() => {
