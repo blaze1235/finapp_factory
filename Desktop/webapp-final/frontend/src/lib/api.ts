@@ -39,6 +39,8 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return res.json();
 }
 
+type CatBody = { Type: string; Category: string };
+
 export const api = {
   getMe: () => apiFetch<import('../types').Account>('/api/auth/me'),
   getCategories: () => apiFetch<import('../types').Category[]>('/api/categories'),
@@ -48,13 +50,38 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  editTransaction: (id: string, data: Partial<import('../types').Transaction>) =>
-    apiFetch<{ ok: boolean }>(`/api/transactions/${id}`, {
+  // Reason is mandatory for edits (audited server-side); draft completion is exempt.
+  editTransaction: (
+    id: string,
+    data: Partial<import('../types').Transaction>,
+    opts: { reason?: string; editorName?: string; draftCompletion?: boolean } = {},
+  ) =>
+    apiFetch<{ ok: boolean; changed: string[] }>(`/api/transactions/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        ...data,
+        Reason: opts.reason || '',
+        Editor_Name: opts.editorName || '',
+        DraftCompletion: opts.draftCompletion || false,
+      }),
     }),
   deleteTransaction: (id: string) =>
     apiFetch<{ ok: boolean }>(`/api/transactions/${id}`, { method: 'DELETE' }),
+  getTransactionHistory: (id: string) =>
+    apiFetch<import('../types').EditLogEntry[]>(`/api/transactions/${id}/history`),
+
+  addCategory: (body: CatBody) =>
+    apiFetch<{ ok: boolean }>('/api/categories', { method: 'POST', body: JSON.stringify(body) }),
+  renameCategory: (body: CatBody & { NewName: string }) =>
+    apiFetch<{ ok: boolean }>('/api/categories', { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteCategory: (body: CatBody) =>
+    apiFetch<{ ok: boolean }>('/api/categories', { method: 'DELETE', body: JSON.stringify(body) }),
+  addSubcategory: (body: CatBody & { Subcategory: string }) =>
+    apiFetch<{ ok: boolean }>('/api/subcategories', { method: 'POST', body: JSON.stringify(body) }),
+  renameSubcategory: (body: CatBody & { Subcategory: string; NewName: string }) =>
+    apiFetch<{ ok: boolean }>('/api/subcategories', { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteSubcategory: (body: CatBody & { Subcategory: string }) =>
+    apiFetch<{ ok: boolean }>('/api/subcategories', { method: 'DELETE', body: JSON.stringify(body) }),
 };
 
 export function getTelegramUser() {

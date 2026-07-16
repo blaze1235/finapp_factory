@@ -7,14 +7,20 @@ export function Drafts() {
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [category, setCategory] = useState('');
+  const [subcategory, setSubcategory] = useState('');
 
   const drafts = transactions.filter(t => t.Type === 'draft');
   const filteredCategories = categories.filter(c => c.Type === type);
+  const subOptions = filteredCategories.find(c => c.Category === category)?.Subcategories || [];
 
   const handleComplete = async (draftId: string) => {
     if (!category) return;
     try {
-      await editTransaction(draftId, { Type: type, Category: category });
+      await editTransaction(
+        draftId,
+        { Type: type, Category: category, Subcategory: subcategory },
+        { draftCompletion: true },
+      );
       setEditingDraftId(null);
     } catch { alert('Ошибка'); }
   };
@@ -52,17 +58,31 @@ export function Drafts() {
               {editingDraftId === draft.ID ? (
                 <div className="space-y-4 pt-4 border-t border-gray-100 mt-2">
                   <div className="flex gap-2">
-                    <button onClick={() => setType('expense')} className={`flex-1 py-3 text-[14px] font-bold rounded-xl border ${type === 'expense' ? 'bg-red-600 text-white border-red-600' : 'bg-gray-50 text-gray-900 border-gray-100'}`}>Расход</button>
-                    <button onClick={() => setType('income')} className={`flex-1 py-3 text-[14px] font-bold rounded-xl border ${type === 'income' ? 'bg-green-600 text-white border-green-600' : 'bg-gray-50 text-gray-900 border-gray-100'}`}>Приход</button>
+                    <button onClick={() => { setType('expense'); setCategory(''); setSubcategory(''); }} className={`flex-1 py-3 text-[14px] font-bold rounded-xl border ${type === 'expense' ? 'bg-red-600 text-white border-red-600' : 'bg-gray-50 text-gray-900 border-gray-100'}`}>Расход</button>
+                    <button onClick={() => { setType('income'); setCategory(''); setSubcategory(''); }} className={`flex-1 py-3 text-[14px] font-bold rounded-xl border ${type === 'income' ? 'bg-green-600 text-white border-green-600' : 'bg-gray-50 text-gray-900 border-gray-100'}`}>Приход</button>
                   </div>
                   <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
                     {filteredCategories.map(c => (
-                      <button key={c.Category} onClick={() => setCategory(c.Category)}
+                      <button key={c.Category} onClick={() => { setCategory(c.Category); setSubcategory(''); }}
                         className={`py-2 px-3 text-xs font-bold rounded-xl truncate border ${category === c.Category ? type === 'income' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200' : 'bg-white text-gray-700 border-gray-100'}`}>
                         {c.Category}
                       </button>
                     ))}
                   </div>
+                  {subOptions.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      <button onClick={() => setSubcategory('')}
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border ${!subcategory ? 'bg-gray-900 text-white border-gray-900' : 'text-gray-600 border-gray-200'}`}>
+                        Без подкатегории
+                      </button>
+                      {subOptions.map(s => (
+                        <button key={s} onClick={() => setSubcategory(s)}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border ${subcategory === s ? 'bg-gray-900 text-white border-gray-900' : 'text-gray-600 border-gray-200'}`}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-2 pt-2">
                     <button onClick={() => setEditingDraftId(null)} className="flex-1 py-3 text-sm font-bold rounded-xl bg-gray-100 text-gray-900 uppercase tracking-wide">Отмена</button>
                     <button onClick={() => handleComplete(draft.ID)} disabled={!category} className="flex-1 py-3 text-sm font-bold rounded-xl bg-gray-900 text-white disabled:opacity-50 uppercase tracking-wide">Сохранить</button>

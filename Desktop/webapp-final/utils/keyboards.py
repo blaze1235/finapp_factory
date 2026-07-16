@@ -48,6 +48,19 @@ def get_category_by_index(type_: str, index: int) -> str:
     return cats[index] if 0 <= index < len(cats) else ""
 
 
+def subcategory_keyboard(subs: list[str], prefix: str = "sub") -> InlineKeyboardMarkup:
+    """Two-per-row subcategory buttons + skip; callbacks are index-based
+    (`{prefix}_{i}`) so names never hit the 64-byte callback_data limit."""
+    rows = []
+    for i in range(0, len(subs), 2):
+        row = [InlineKeyboardButton(subs[i], callback_data=f"{prefix}_{i}")]
+        if i + 1 < len(subs):
+            row.append(InlineKeyboardButton(subs[i+1], callback_data=f"{prefix}_{i+1}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("⏭ Без подкатегории", callback_data=f"{prefix}_skip")])
+    return InlineKeyboardMarkup(rows)
+
+
 def confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_tx"),

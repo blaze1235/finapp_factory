@@ -1,26 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { useAppContext } from '../contexts/AppContext';
 import { formatCompact, formatFull } from '../lib/formatters';
-
-function parseDate(str: string): Date | null {
-  if (!str) return null;
-  const [d, m, y] = str.split('.');
-  if (!d || !m || !y) return null;
-  return new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-}
+import { parseDate } from '../lib/analytics';
+import { TxDrawer } from '../components/TxDrawer';
+import { Transaction } from '../types';
 
 function fromInputDate(str: string): string {
   if (!str) return '';
   const [y, m, d] = str.split('-');
   return `${d}.${m}.${y}`;
 }
-
-type TxDetail = {
-  ID: string; Date: string; Type: string; Category: string;
-  Amount_UZS: string | number; Amount_USD: string | number;
-  USD_Rate: string | number; Note: string; Editor_Name: string;
-  Currency: string; Timestamp: string;
-};
 
 export function Reports() {
   const { transactions, categories } = useAppContext();
@@ -34,7 +23,7 @@ export function Reports() {
   const [sortBy, setSortBy] = useState<'date' | 'amount'>('date');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedTx, setSelectedTx] = useState<TxDetail | null>(null);
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
   // Separate category lists from sheet
   const incomeCategories = useMemo(() =>
@@ -94,6 +83,7 @@ export function Reports() {
       txs = txs.filter(t =>
         t.Note?.toLowerCase().includes(q) ||
         t.Category?.toLowerCase().includes(q) ||
+        t.Subcategory?.toLowerCase().includes(q) ||
         t.Editor_Name?.toLowerCase().includes(q) ||
         String(t.Amount_UZS ?? '').includes(q)
       );
@@ -172,82 +162,12 @@ export function Reports() {
 
   return (
     <div className="space-y-5 pb-8">
-      {/* Transaction detail modal */}
-      {selectedTx && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setSelectedTx(null)}>
-          <div className="bg-white rounded-t-3xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-start">
-              <div>
-                <span className={`text-[10px] font-extrabold uppercase tracking-widest px-2 py-1 rounded-lg ${
-                  selectedTx.Type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                }`}>
-                  {selectedTx.Type === 'income' ? '▲ Доход' : '▼ Расход'}
-                </span>
-                <p className="text-[13px] font-extrabold text-gray-900 mt-2 uppercase tracking-wide">{selectedTx.Category}</p>
-              </div>
-              <button onClick={() => setSelectedTx(null)} className="text-gray-400 text-[20px] leading-none">×</button>
-            </div>
-
-            {/* Amount */}
-            <div className={`rounded-2xl p-4 ${selectedTx.Type === 'income' ? 'bg-green-50' : 'bg-red-50'}`}>
-              <p className="text-[11px] text-gray-500 mb-1">Сумма</p>
-              {selectedTx.Currency === 'USD' ? (
-                <>
-                  <p className="text-[28px] font-extrabold text-gray-900">
-                    ${formatFull(parseFloat(String(selectedTx.Amount_USD ?? 0)))}
-                  </p>
-                  <p className="text-[12px] text-gray-500 mt-1">
-                    = {formatFull(parseFloat(String(selectedTx.Amount_UZS ?? 0)))} сум
-                    {selectedTx.USD_Rate ? ` (курс ${formatFull(parseFloat(String(selectedTx.USD_Rate)))})` : ''}
-                  </p>
-                </>
-              ) : (
-                <p className="text-[28px] font-extrabold text-gray-900">
-                  {formatFull(parseFloat(String(selectedTx.Amount_UZS ?? 0)))} сум
-                </p>
-              )}
-            </div>
-
-            {/* Balance after */}
-            {runningBalances[selectedTx.ID] !== undefined && (
-              <div className="bg-gray-50 rounded-2xl p-4">
-                <p className="text-[11px] text-gray-500 mb-1">Баланс после операции</p>
-                <p className={`text-[22px] font-extrabold ${runningBalances[selectedTx.ID] >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
-                  {formatFull(runningBalances[selectedTx.ID])} сум
-                </p>
-              </div>
-            )}
-
-            {/* Details */}
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-[12px] text-gray-500">Дата</span>
-                <span className="text-[12px] font-bold text-gray-900">{selectedTx.Date}</span>
-              </div>
-              {selectedTx.Note && (
-                <div className="flex justify-between gap-4">
-                  <span className="text-[12px] text-gray-500 flex-shrink-0">Комментарий</span>
-                  <span className="text-[12px] font-bold text-gray-900 text-right">{selectedTx.Note}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-[12px] text-gray-500">Редактор</span>
-                <span className="text-[12px] font-bold text-gray-900">{selectedTx.Editor_Name}</span>
-              </div>
-              {selectedTx.Timestamp && (
-                <div className="flex justify-between">
-                  <span className="text-[12px] text-gray-500">Добавлено</span>
-                  <span className="text-[12px] font-bold text-gray-900">{selectedTx.Timestamp}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-[12px] text-gray-500">ID</span>
-                <span className="text-[11px] font-mono text-gray-400">{selectedTx.ID}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Transaction detail drawer (draggable, editable with mandatory reason) */}
+      <TxDrawer
+        tx={selectedTx}
+        onClose={() => setSelectedTx(null)}
+        runningBalance={selectedTx ? runningBalances[selectedTx.ID] : undefined}
+      />
 
       <div className="flex justify-between items-center">
         <h2 className="text-[24px] font-extrabold tracking-tight text-gray-900">Отчёты</h2>
@@ -438,12 +358,15 @@ export function Reports() {
         ) : (
           <div className="space-y-2">
             {filtered.map(tx => (
-              <button key={tx.ID} onClick={() => setSelectedTx(tx as TxDetail)}
+              <button key={tx.ID} onClick={() => setSelectedTx(tx)}
                 className="w-full text-left bg-white p-4 rounded-2xl border border-gray-100 hover:border-gray-300 transition-colors active:scale-[0.99]">
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full flex-shrink-0 ${tx.Type === 'income' ? 'bg-green-500' : 'bg-red-500'}`} />
-                    <span className="text-[12px] font-bold text-gray-900 uppercase tracking-widest">{tx.Category}</span>
+                    <span className="text-[12px] font-bold text-gray-900 uppercase tracking-widest">
+                      {tx.Category}
+                      {tx.Subcategory ? <span className="text-gray-400"> · {tx.Subcategory}</span> : null}
+                    </span>
                   </div>
                   <span className={`text-[14px] font-extrabold ${tx.Type === 'income' ? 'text-green-600' : 'text-gray-900'}`}>
                     {tx.Type === 'income' ? '+' : '-'}

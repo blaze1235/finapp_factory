@@ -137,17 +137,139 @@ def me():
 @app.get("/api/categories")
 @require_auth
 def categories():
+    """Categories with their subcategories: [{Type, Category, Subcategories}]."""
     sheets = _sheets()
     try:
-        sh = sheets._get_sheet()
-        ws = sh.worksheet("Categories")
-        records = ws.get_all_records()
-        return jsonify([
-            {"Category": r["Category"], "Type": r["Type"]}
-            for r in records if r.get("Category")
-        ])
+        return jsonify(sheets.get_categories_full())
     except Exception as e:
         logger.error("categories error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+def _require_editor():
+    if request.user_role not in ("editor", "finance_director"):
+        return jsonify({"error": "Forbidden"}), 403
+    return None
+
+
+@app.post("/api/categories")
+@require_auth
+def add_category():
+    forbidden = _require_editor()
+    if forbidden:
+        return forbidden
+    data = request.get_json() or {}
+    type_, name = data.get("Type", ""), data.get("Category", "")
+    if type_ not in ("income", "expense") or not name.strip():
+        return jsonify({"error": "Нужны Type (income/expense) и Category"}), 400
+    try:
+        _sheets().add_category(type_, name)
+        return jsonify({"ok": True}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error("add_category error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.patch("/api/categories")
+@require_auth
+def rename_category():
+    forbidden = _require_editor()
+    if forbidden:
+        return forbidden
+    data = request.get_json() or {}
+    type_, old, new = data.get("Type", ""), data.get("Category", ""), data.get("NewName", "")
+    if not (type_ and old and new.strip()):
+        return jsonify({"error": "Нужны Type, Category и NewName"}), 400
+    try:
+        _sheets().rename_category(type_, old, new)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error("rename_category error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.delete("/api/categories")
+@require_auth
+def delete_category():
+    forbidden = _require_editor()
+    if forbidden:
+        return forbidden
+    data = request.get_json() or {}
+    type_, name = data.get("Type", ""), data.get("Category", "")
+    if not (type_ and name):
+        return jsonify({"error": "Нужны Type и Category"}), 400
+    try:
+        _sheets().delete_category(type_, name)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error("delete_category error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/subcategories")
+@require_auth
+def add_subcategory():
+    forbidden = _require_editor()
+    if forbidden:
+        return forbidden
+    data = request.get_json() or {}
+    type_, cat, name = data.get("Type", ""), data.get("Category", ""), data.get("Subcategory", "")
+    if not (type_ and cat and name.strip()):
+        return jsonify({"error": "Нужны Type, Category и Subcategory"}), 400
+    try:
+        _sheets().add_subcategory(type_, cat, name)
+        return jsonify({"ok": True}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error("add_subcategory error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.patch("/api/subcategories")
+@require_auth
+def rename_subcategory():
+    forbidden = _require_editor()
+    if forbidden:
+        return forbidden
+    data = request.get_json() or {}
+    type_, cat = data.get("Type", ""), data.get("Category", "")
+    old, new = data.get("Subcategory", ""), data.get("NewName", "")
+    if not (type_ and cat and old and new.strip()):
+        return jsonify({"error": "Нужны Type, Category, Subcategory и NewName"}), 400
+    try:
+        _sheets().rename_subcategory(type_, cat, old, new)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error("rename_subcategory error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.delete("/api/subcategories")
+@require_auth
+def delete_subcategory():
+    forbidden = _require_editor()
+    if forbidden:
+        return forbidden
+    data = request.get_json() or {}
+    type_, cat, name = data.get("Type", ""), data.get("Category", ""), data.get("Subcategory", "")
+    if not (type_ and cat and name):
+        return jsonify({"error": "Нужны Type, Category и Subcategory"}), 400
+    try:
+        _sheets().delete_subcategory(type_, cat, name)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error("delete_subcategory error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -182,6 +304,7 @@ def add_transaction():
             usd_rate=float(data.get("USD_Rate", 0)),
             currency=data.get("Currency", "UZS"),
             tx_date=data.get("Date"),
+            subcategory=data.get("Subcategory", ""),
         )
         # Notify group if configured
         _notify_group(data, request.tg_id)
@@ -206,25 +329,115 @@ def delete_transaction(tx_id):
 @app.patch("/api/transactions/<tx_id>")
 @require_auth
 def edit_transaction(tx_id):
+    """Edit a transaction. A non-empty `Reason` is mandatory; every change is
+    written to the Edit_Log sheet (who, when, why, what changed).
+    Exception: completing a draft (Type draft → income/expense) needs no reason."""
     if request.user_role not in ("editor", "finance_director"):
         return jsonify({"error": "Forbidden"}), 403
     sheets = _sheets()
     data = request.get_json() or {}
+    reason = str(data.pop("Reason", "") or "").strip()
+    editor_name = str(data.pop("Editor_Name", "") or "")
+    is_draft_completion = bool(data.pop("DraftCompletion", False))
+    if not data:
+        return jsonify({"error": "Нет изменений"}), 400
+    if not is_draft_completion and len(reason) < 3:
+        return jsonify({"error": "Укажите причину изменения (обязательно)"}), 400
     try:
-        sh = sheets._get_sheet()
-        ws = sh.worksheet("Transactions")
-        all_rows = ws.get_all_values()
-        headers = all_rows[0]
-        for i, row in enumerate(all_rows[1:], start=2):
-            if row and str(row[0]).upper() == tx_id.upper():
-                for field, value in data.items():
-                    if field in headers:
-                        col = headers.index(field) + 1
-                        ws.update_cell(i, col, value)
-                return jsonify({"ok": True})
-        return jsonify({"error": "Not found"}), 404
+        changes = sheets.update_transaction(tx_id, data)
+        if changes is None:
+            return jsonify({"error": "Not found"}), 404
+        if changes and not is_draft_completion:
+            sheets.append_edit_log(tx_id, request.tg_id, editor_name, reason, changes)
+        return jsonify({"ok": True, "changed": list(changes.keys())})
     except Exception as e:
         logger.error("edit_transaction error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/transactions/<tx_id>/history")
+@require_auth
+def transaction_history(tx_id):
+    try:
+        return jsonify(_sheets().get_edit_log(tx_id))
+    except Exception as e:
+        logger.error("transaction_history error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/analytics/summary")
+@require_auth
+def analytics_summary():
+    """Structured analytics for a period — the single data contract for the UI
+    and for future AI analysis. ?period=YYYY-MM | all (default: current month).
+
+    Returns: period, totals (income/expense/net, USD, counts), by_category
+    (with per-subcategory breakdown), daily series, available_months.
+    """
+    from datetime import datetime as dt
+    sheets = _sheets()
+    period = request.args.get("period", "").strip() or dt.now().strftime("%Y-%m")
+    try:
+        txs = [t for t in sheets.get_all_transactions() if t.get("Type") in ("income", "expense")]
+
+        def month_key(t):
+            try:
+                d = dt.strptime(t.get("Date", ""), "%d.%m.%Y")
+                return d.strftime("%Y-%m")
+            except ValueError:
+                return None
+
+        available_months = sorted({m for m in (month_key(t) for t in txs) if m}, reverse=True)
+        if period != "all":
+            txs = [t for t in txs if month_key(t) == period]
+
+        totals = {"income_uzs": 0.0, "expense_uzs": 0.0, "income_usd": 0.0, "expense_usd": 0.0,
+                  "income_count": 0, "expense_count": 0}
+        by_category = {}
+        daily = {}
+        for t in txs:
+            typ = t["Type"]
+            uzs = float(t.get("Amount_UZS") or 0)
+            usd = float(t.get("Amount_USD") or 0)
+            totals[f"{typ}_uzs"] += uzs
+            totals[f"{typ}_usd"] += usd
+            totals[f"{typ}_count"] += 1
+
+            cat_key = (typ, t.get("Category", ""))
+            cat = by_category.setdefault(cat_key, {"type": typ, "category": t.get("Category", ""),
+                                                   "total_uzs": 0.0, "count": 0, "subcategories": {}})
+            cat["total_uzs"] += uzs
+            cat["count"] += 1
+            sub = t.get("Subcategory", "") or "—"
+            cat["subcategories"][sub] = cat["subcategories"].get(sub, 0.0) + uzs
+
+            day = t.get("Date", "")
+            drec = daily.setdefault(day, {"date": day, "income_uzs": 0.0, "expense_uzs": 0.0})
+            drec[f"{typ}_uzs"] += uzs
+
+        cats = sorted(by_category.values(), key=lambda c: -c["total_uzs"])
+        for c in cats:
+            c["subcategories"] = [
+                {"subcategory": k, "total_uzs": v}
+                for k, v in sorted(c["subcategories"].items(), key=lambda kv: -kv[1])
+            ]
+
+        def daily_sort_key(d):
+            try:
+                return dt.strptime(d["date"], "%d.%m.%Y")
+            except ValueError:
+                return dt.min
+        days = sorted(daily.values(), key=daily_sort_key)
+
+        return jsonify({
+            "period": period,
+            "totals": {**totals, "net_uzs": totals["income_uzs"] - totals["expense_uzs"]},
+            "by_category": cats,
+            "daily": days,
+            "available_months": available_months,
+        })
+    except Exception as e:
+        logger.error("analytics_summary error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

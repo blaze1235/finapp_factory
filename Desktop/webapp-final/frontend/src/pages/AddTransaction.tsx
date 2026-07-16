@@ -9,12 +9,14 @@ export function AddTransaction() {
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
+  const [subcategory, setSubcategory] = useState('');
   const [note, setNote] = useState('');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [rate, setRate] = useState('');
 
   const filteredCategories = categories.filter(c => c.Type === type);
+  const subOptions = filteredCategories.find(c => c.Category === category)?.Subcategories || [];
   const isUSD = amount.startsWith('$');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,6 +38,7 @@ export function AddTransaction() {
         Date: format(new Date(date), 'dd.MM.yyyy'),
         Type: type,
         Category: category,
+        Subcategory: subcategory,
         Amount_UZS: amountUzs,
         Amount_USD: amountUsd,
         USD_Rate: rate ? parseFloat(rate) : 0,
@@ -90,11 +93,11 @@ export function AddTransaction() {
       <div className="bg-white rounded-2xl p-6 border border-gray-100">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="flex gap-2">
-            <button type="button" onClick={() => { setType('expense'); setCategory(''); }}
+            <button type="button" onClick={() => { setType('expense'); setCategory(''); setSubcategory(''); }}
               className={`flex-1 py-3 text-[14px] font-bold rounded-xl border ${type === 'expense' ? 'bg-red-600 text-white border-red-600' : 'bg-gray-50 text-gray-900 border-gray-100'}`}>
               Расход
             </button>
-            <button type="button" onClick={() => { setType('income'); setCategory(''); }}
+            <button type="button" onClick={() => { setType('income'); setCategory(''); setSubcategory(''); }}
               className={`flex-1 py-3 text-[14px] font-bold rounded-xl border ${type === 'income' ? 'bg-green-600 text-white border-green-600' : 'bg-gray-50 text-gray-900 border-gray-100'}`}>
               Приход
             </button>
@@ -114,18 +117,44 @@ export function AddTransaction() {
             </div>
           )}
           <div>
-            <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-2">Категория</label>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Категория</label>
+              <button type="button" onClick={() => navigate('/categories')}
+                className="text-[10px] font-bold text-gray-400 uppercase tracking-widest hover:text-gray-900">
+                ⚙ Управление
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">
               {filteredCategories.map(c => (
-                <button key={c.Category} type="button" onClick={() => setCategory(c.Category)}
+                <button key={c.Category} type="button" onClick={() => { setCategory(c.Category); setSubcategory(''); }}
                   className={`py-3 px-3 text-xs font-bold rounded-xl text-left truncate border ${category === c.Category
                     ? type === 'income' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'
                     : 'bg-white text-gray-900 border-gray-100'}`}>
                   {c.Category}
+                  {c.Subcategories.length > 0 && <span className="text-gray-400 font-normal"> ({c.Subcategories.length})</span>}
                 </button>
               ))}
             </div>
           </div>
+          {subOptions.length > 0 && (
+            <div>
+              <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-2">
+                Подкатегория <span className="text-gray-300 normal-case">(необязательно)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                <button type="button" onClick={() => setSubcategory('')}
+                  className={`px-3 py-2 rounded-xl text-[12px] font-bold border ${!subcategory ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-100'}`}>
+                  Без
+                </button>
+                {subOptions.map(s => (
+                  <button key={s} type="button" onClick={() => setSubcategory(s)}
+                    className={`px-3 py-2 rounded-xl text-[12px] font-bold border ${subcategory === s ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-100'}`}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-2">Дата</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)}

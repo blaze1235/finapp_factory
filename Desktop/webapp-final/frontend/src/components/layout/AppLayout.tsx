@@ -8,7 +8,8 @@ import { Drafts } from '../../pages/Drafts';
 import { Reports } from '../../pages/Reports';
 import { Balance } from '../../pages/Balance';
 import { Analytics } from '../../pages/Analytics';
-import { Home, FileBarChart, PlusCircle, CreditCard, LayoutDashboard, BarChart2 } from 'lucide-react';
+import { CategoriesManager } from '../../pages/CategoriesManager';
+import { Home, FileBarChart, PlusCircle, CreditCard, LayoutDashboard, BarChart2, FolderTree } from 'lucide-react';
 
 function Navbar() {
   const { currentUser } = useAppContext();
@@ -49,6 +50,8 @@ function Navbar() {
 
 export function AppLayout() {
   const { currentUser, isLoading, needsLogin, logout, refreshData } = useAppContext();
+  const navigate = useNavigate();
+  const canEdit = currentUser?.Role === 'editor' || currentUser?.Role === 'finance_director';
 
   if (isLoading) {
     return (
@@ -73,6 +76,12 @@ export function AppLayout() {
           <span className="text-gray-500 font-normal text-[14px] ml-2 normal-case hidden sm:inline tracking-normal">Web Portal</span>
         </div>
         <div className="flex items-center gap-3">
+          {canEdit && (
+            <button onClick={() => navigate('/categories')} title="Категории и подкатегории"
+              className="hover:bg-[#EEEEEE] text-gray-500 py-1 px-3 rounded font-bold border border-gray-100">
+              <FolderTree size={14} />
+            </button>
+          )}
           <button onClick={refreshData} className="text-[11px] hover:bg-[#EEEEEE] text-gray-500 uppercase tracking-wider py-1 px-3 rounded font-bold border border-gray-100">↻</button>
           <span className="text-[11px] font-bold bg-gray-900 text-white px-2 py-1 rounded uppercase tracking-wider hidden sm:inline-block">
             {currentUser.Role?.replace('_', ' ')}
@@ -89,6 +98,7 @@ export function AppLayout() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/balance" element={<Balance />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/categories" element={<CategoriesManager />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

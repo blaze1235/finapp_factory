@@ -15,8 +15,13 @@ interface AppContextType extends AppState {
   login: (tgId: string) => Promise<boolean>;
   logout: () => void;
   refreshData: () => Promise<void>;
+  refreshCategories: () => Promise<void>;
   addTransaction: (tx: Partial<Transaction>) => Promise<void>;
-  editTransaction: (id: string, tx: Partial<Transaction>) => Promise<void>;
+  editTransaction: (
+    id: string,
+    tx: Partial<Transaction>,
+    opts?: { reason?: string; draftCompletion?: boolean },
+  ) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
 }
 
@@ -108,8 +113,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setState(s => ({ ...s, transactions }));
   };
 
-  const editTransaction = async (id: string, tx: Partial<Transaction>) => {
-    await api.editTransaction(id, tx);
+  const editTransaction = async (
+    id: string,
+    tx: Partial<Transaction>,
+    opts: { reason?: string; draftCompletion?: boolean } = {},
+  ) => {
+    await api.editTransaction(id, tx, {
+      reason: opts.reason,
+      editorName: state.currentUser?.Full_Name || '',
+      draftCompletion: opts.draftCompletion,
+    });
     const transactions = await api.getTransactions();
     setState(s => ({ ...s, transactions }));
   };
@@ -119,10 +132,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setState(s => ({ ...s, transactions: s.transactions.filter(t => t.ID !== id) }));
   };
 
+  const refreshCategories = async () => {
+    const categories = await api.getCategories();
+    setState(s => ({ ...s, categories }));
+  };
+
   return (
     <AppContext.Provider value={{
       ...state,
-      login, logout, refreshData, addTransaction, editTransaction, deleteTransaction,
+      login, logout, refreshData, refreshCategories,
+      addTransaction, editTransaction, deleteTransaction,
     }}>
       {children}
     </AppContext.Provider>

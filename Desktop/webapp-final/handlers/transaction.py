@@ -6,14 +6,19 @@ from telegram.ext import (
     ContextTypes, ConversationHandler, CommandHandler,
     CallbackQueryHandler, MessageHandler, filters
 )
-from utils.sheets import log_transaction, get_directors_and_finance, fmt_amount, get_user_role
-from utils.keyboards import category_keyboard, get_category_by_index, confirm_keyboard
+from utils.sheets import (
+    log_transaction, get_directors_and_finance, fmt_amount,
+    get_user_role, get_subcategories,
+)
+from utils.keyboards import (
+    category_keyboard, get_category_by_index, confirm_keyboard, subcategory_keyboard,
+)
 from utils.reports import format_transaction_notification, get_balance_details
 import pytz
 
 TZ = pytz.timezone("Asia/Tashkent")
 
-CHOOSE_CATEGORY, CHOOSE_DATE, ENTER_AMOUNT, ENTER_NOTE, ENTER_USD_RATE, CONFIRM = range(6)
+CHOOSE_CATEGORY, CHOOSE_SUBCATEGORY, CHOOSE_DATE, ENTER_AMOUNT, ENTER_NOTE, ENTER_USD_RATE, CONFIRM = range(7)
 
 
 def cancel_button() -> InlineKeyboardMarkup:
@@ -69,6 +74,16 @@ async def start_expense_from_reply(update: Update, ctx: ContextTypes.DEFAULT_TYP
     return await _start_flow(update, ctx, "expense", from_reply=True)
 
 
+async def _ask_date(query):
+    await query.edit_message_text(
+        f"📅 <b>Дата транзакции / Sana:</b>\n\n"
+        f"Нажмите «Сегодня» или введите вручную в формате <code>DD.MM.YYYY</code>",
+        reply_markup=date_keyboard(),
+        parse_mode="HTML"
+    )
+    return CHOOSE_DATE
+
+
 async def choose_category(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -81,14 +96,32 @@ async def choose_category(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     ctx.user_data["tx_category"] = cat
+    ctx.user_data["tx_subcategory"] = ""
 
-    await query.edit_message_text(
-        f"📅 <b>Дата транзакции / Sana:</b>\n\n"
-        f"Нажмите «Сегодня» или введите вручную в формате <code>DD.MM.YYYY</code>",
-        reply_markup=date_keyboard(),
-        parse_mode="HTML"
-    )
-    return CHOOSE_DATE
+    subs = get_subcategories(type_, cat)
+    if subs:
+        ctx.user_data["tx_subs"] = subs
+        await query.edit_message_text(
+            f"📂 {cat}\n\n<b>Выберите подкатегорию / Subkategoriya:</b>",
+            reply_markup=subcategory_keyboard(subs),
+            parse_mode="HTML"
+        )
+        return CHOOSE_SUBCATEGORY
+
+    return await _ask_date(query)
+
+
+async def choose_subcategory(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    token = query.data.split("_", 1)[1]   # sub_3 | sub_skip
+    if token != "skip":
+        subs = ctx.user_data.get("tx_subs", [])
+        try:
+            ctx.user_data["tx_subcategory"] = subs[int(token)]
+        except (ValueError, IndexError):
+            ctx.user_data["tx_subcategory"] = ""
+    return await _ask_date(query)
 
 
 async def choose_date_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -204,6 +237,7 @@ async def enter_note(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["note"] = note
     type_ = ctx.user_data["tx_type"]
     cat = ctx.user_data["tx_category"]
+    sub = ctx.user_data.get("tx_subcategory", "")
     date_str = ctx.user_data.get("tx_date", datetime.now(TZ).strftime("%d.%m.%Y"))
     amount_uzs = ctx.user_data["amount_uzs"]
     amount_usd = ctx.user_data.get("amount_usd", 0)
@@ -213,10 +247,11 @@ async def enter_note(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     icon = "▲" if type_ == "income" else "▼"
     type_label = "ДОХОД / KIRIM" if type_ == "income" else "РАСХОД / CHIQIM"
     amt_str = fmt_amount(amount_uzs, amount_usd, usd_rate, currency)
+    cat_line = f"{cat} · {sub}" if sub else cat
 
     preview = (
         f"{icon} <b>{type_label}</b>\n"
-        f"📂 {cat}\n"
+        f"📂 {cat_line}\n"
         f"📅 {date_str}\n"
         f"💬 {note}\n"
         f"💰 {amt_str}\n\n"
@@ -245,6 +280,7 @@ async def confirm_transaction(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         usd_rate=ctx.user_data.get("usd_rate", 0),
         currency=ctx.user_data.get("currency", "UZS"),
         tx_date=tx_date,
+        subcategory=ctx.user_data.get("tx_subcategory", ""),
     )
 
     try:
@@ -323,6 +359,7 @@ def get_transaction_handler() -> ConversationHandler:
         ],
         states={
             CHOOSE_CATEGORY: [CallbackQueryHandler(choose_category, pattern="^cat_")],
+            CHOOSE_SUBCATEGORY: [CallbackQueryHandler(choose_subcategory, pattern="^sub_")],
             CHOOSE_DATE: [
                 CallbackQueryHandler(choose_date_button, pattern="^date_today_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, choose_date_manual),

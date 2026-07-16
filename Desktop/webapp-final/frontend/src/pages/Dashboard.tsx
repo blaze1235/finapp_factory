@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../contexts/AppContext';
 import { formatCurrency } from '../lib/formatters';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Plus } from 'lucide-react';
 
 export function Dashboard() {
   const { transactions, currentUser, deleteTransaction } = useAppContext();
@@ -46,18 +46,20 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Floating Add Transaction button — fixed above the bottom navbar */}
       {canEdit && (
-        <div className="pt-2">
-          <button
-            onClick={() => navigate('/add')}
-            className="w-full bg-gray-900 text-white rounded-2xl p-4 font-bold uppercase tracking-widest text-[13px] hover:bg-gray-800 transition-colors"
-          >
-            + Новая операция
-          </button>
-        </div>
+        <button
+          onClick={() => navigate('/add')}
+          aria-label="Новая операция"
+          className="fixed z-40 right-4 bg-gray-900 text-white rounded-full shadow-lg shadow-gray-900/30 hover:bg-gray-800 active:scale-95 transition-all flex items-center gap-2 pl-4 pr-5 py-3.5 font-bold uppercase tracking-widest text-[12px]"
+          style={{ bottom: 'calc(96px + env(safe-area-inset-bottom, 0px))' }}
+        >
+          <Plus size={18} strokeWidth={3} />
+          Операция
+        </button>
       )}
 
-      <div className="pt-8">
+      <div className="pt-4">
         <div className="flex justify-between items-end mb-6">
           <h3 className="text-[18px] font-extrabold tracking-tight text-gray-900">Последние операции</h3>
         </div>
@@ -73,7 +75,10 @@ export function Dashboard() {
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full ${tx.Type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                    <span className="text-[13px] font-bold text-gray-900 uppercase tracking-widest">{tx.Category}</span>
+                    <span className="text-[13px] font-bold text-gray-900 uppercase tracking-widest">
+                      {tx.Category}
+                      {tx.Subcategory ? <span className="text-gray-400"> · {tx.Subcategory}</span> : null}
+                    </span>
                   </div>
                   <span className={`text-[15px] font-extrabold ${tx.Type === 'income' ? 'text-green-600' : 'text-gray-900'}`}>
                     {tx.Type === 'income' ? '+' : '-'}{tx.Currency === 'USD'
