@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fbfbfa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c1917" media="(prefers-color-scheme: dark)">
+<title>Loyihalaringiz</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%231c1917'/><text y='68' x='50' text-anchor='middle' font-size='54' font-family='system-ui' font-weight='700' fill='%23fbfbfa'>◍</text></svg>">
+<style>
+  /* The portal is one calm column. A client should be able to answer "where is
+     it?" and "does this need me?" without learning a layout. */
+  .portal { max-width: 680px; margin: 0 auto; padding: 30px 18px 70px; }
+  .phead { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+  .needs {
+    border: 1.5px solid var(--accent); background: var(--accent-bg);
+    border-radius: 14px; padding: 18px; margin-bottom: 22px;
+  }
+  .needs h2 { color: var(--accent); margin-bottom: 14px; }
+  .deliv {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 13px 15px; margin-bottom: 9px; cursor: pointer;
+  }
+  .deliv:hover { border-color: var(--ink-3); }
+  .deliv .t { font-weight: 600; }
+  .bucket-t { font-size: 12px; font-weight: 650; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--ink-3); margin: 22px 0 10px; }
+  .decide { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 16px; }
+  @media (max-width: 480px) { .decide { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="/kit.js"></script>
+<script src="/portal/portal.js"></script>
+</body>
+</html>
