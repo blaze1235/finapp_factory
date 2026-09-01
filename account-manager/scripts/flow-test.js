@@ -76,11 +76,13 @@ async function main() {
   const accountantId = await mkUser('Bookkeeper', '+998900000002', 'accountant');
   const designerId   = await mkUser('Designer',   '+998900000003', 'teammate', { craft: 'designer' });
   const outsiderId   = await mkUser('Outsider',   '+998900000004', 'teammate', { craft: 'smm' });
+  const editorId     = await mkUser('Editor',     '+998900000007', 'editor',   { craft: 'motion' });
 
   const owner      = await login('+998900000001', '1234');
   const accountant = await login('+998900000002', '1234');
   const designer   = await login('+998900000003', '1234');
   const outsider   = await login('+998900000004', '1234');
+  const editor     = await login('+998900000007', '1234');
   ok('all four staff logins work', owner && accountant && designer && outsider);
 
   section('Clients and projects');
@@ -101,6 +103,7 @@ async function main() {
   ok('projects created with agreed rounds', proj?.revisions_included === 2);
 
   await call(owner, 'POST', `/api/projects/${proj.id}/members`, { user_id: designerId, craft: 'designer' });
+  await call(owner, 'POST', `/api/projects/${proj.id}/members`, { user_id: editorId, craft: 'motion' });
 
   const deliverable = (await call(owner, 'POST', '/api/tasks', {
     project_id: proj.id, title: 'Key visual', assignee_id: designerId,
@@ -123,7 +126,7 @@ async function main() {
   const outTasks = (await call(outsider, 'GET', '/api/tasks')).body;
   ok('a non-member sees nothing at all', outTasks.length === 0, `saw ${outTasks.length}`);
   ok('teammate is refused finance', (await call(designer, 'GET', '/api/finance/summary')).status === 403);
-  ok('teammate is refused the invoice list', (await call(designer, 'GET', '/api/finance/invoices')).status === 403);
+  ok('teammate is refused the ledger', (await call(designer, 'GET', '/api/finance/transactions')).status === 403);
 
   ok('teammate may move their own status',
      (await call(designer, 'PATCH', `/api/tasks/${deliverable.id}`, { status: 'in_review' })).status === 200);
@@ -140,6 +143,7 @@ async function main() {
   ok('accountant sees client companies', (await call(accountant, 'GET', '/api/companies')).body.length === 2);
   ok('accountant reaches finance', (await call(accountant, 'GET', '/api/finance/summary')).status === 200);
   ok('accountant is refused the dashboard', (await call(accountant, 'GET', '/api/dashboard')).status === 403);
+  ok('accountant is refused the leaderboard', (await call(accountant, 'GET', '/api/performance/leaderboard')).status === 403);
   const acctTasks = await call(accountant, 'GET', '/api/tasks');
   ok('accountant sees no tasks whatsoever', acctTasks.status === 200 && acctTasks.body.length === 0,
      `saw ${acctTasks.body?.length}`);
@@ -158,13 +162,21 @@ async function main() {
   ok('client sees only the client-visible task', portal.body.tasks.length === 1,
      `saw ${portal.body.tasks.length}`);
   ok('client sees the deliverable is waiting on them', portal.body.awaiting.length === 1);
-  ok('client sees the assignee name (they asked for it)', portal.body.tasks[0].assignee === 'Designer');
+  // REVERSAL (v2): the revised spec says team members must not be visible on
+  // the client's view. Asserted as an absence, and again as a string search,
+  // because this is exactly the kind of field that creeps back in.
+  ok('client is not told who is doing the work',
+     portal.body.tasks[0].assignee === undefined && portal.body.tasks[0].assignee_id === undefined);
+  ok("no teammate's name appears anywhere in the portal payload",
+     !JSON.stringify(portal.body).includes('Designer'));
 
   const asText = JSON.stringify(portal.body);
   ok('internal task title never appears', !asText.includes('INTERNAL-ONLY-CONCEPT-GRAVEYARD'));
   ok('internal comment never appears', !asText.includes('INTERNAL-GRUMBLE'));
   ok('internal note on the company never appears', !asText.includes('SECRET-NOTE-PAYS-LATE'));
-  const leaked = findForbidden(portal.body, ['due_date', 'visibility', 'client_visible_from', 'internal_notes', 'budget_amount']);
+  const leaked = findForbidden(portal.body, ['due_date', 'visibility', 'client_visible_from',
+                                             'internal_notes', 'budget_amount', 'assignee', 'assignee_id',
+                                             'difficulty', 'points', 'missed']);
   ok('no internal COLUMN leaks into the portal payload', leaked.length === 0, leaked.join(', '));
   ok('the client is shown the padded date, not the real one',
      portal.body.tasks[0].due === '2026-08-30');
@@ -226,14 +238,20 @@ async function main() {
   ok('billing without an amount is refused', billNoAmount.status === 400);
   const billed = await call(owner, 'POST', `/api/scope-alerts/${alerts[0].id}/resolve`,
     { resolution: 'billed', amount: 3000000 });
-  ok('owner bills it as extra scope', billed.status === 200 && !!billed.body.invoice_id);
+  ok('owner bills it as extra scope', billed.status === 200 && !!billed.body.transaction_id);
   const twice = await call(owner, 'POST', `/api/scope-alerts/${alerts[0].id}/resolve`,
     { resolution: 'absorbed' });
   ok('the same alert cannot be decided twice', twice.status === 409);
 
-  const inv = (await call(accountant, 'GET', '/api/finance/invoices')).body;
-  ok('the extra scope lands on a draft invoice the accountant can see',
-     inv.some(i => Number(i.total) === 3000000), JSON.stringify(inv.map(i => i.total)));
+  const ledger = (await call(accountant, 'GET', '/api/finance/transactions')).body;
+  const extra = ledger.find(t => Number(t.amount) === 3000000);
+  ok('the extra scope lands in the ledger for the accountant to see', !!extra);
+  ok('it is booked as money owed, not money received',
+     extra && extra.direction === 'in' && extra.settled === false && extra.status !== 'received');
+  const fin = (await call(accountant, 'GET', '/api/finance/summary')).body;
+  ok('it lifts profit for the month', Number(fin.earned) >= 3000000);
+  ok('it does NOT move cash, because nobody has paid it yet', Number(fin.received) === 0,
+     `received ${fin.received}`);
   ok('a teammate cannot resolve a scope alert',
      (await call(designer, 'POST', `/api/scope-alerts/${alerts[0].id}/resolve`, { resolution: 'absorbed' })).status === 403);
 
@@ -288,13 +306,161 @@ async function main() {
   const clientLink = await call(client, 'GET', `/api/files/${fileId}/link`);
   ok('a client cannot mint a link for an internal file', clientLink.status === 404, `got ${clientLink.status}`);
 
+
+  section('Editor vs Member — the fifth permission level (§8)');
+  const memberTask = await call(designer, 'POST', '/api/tasks',
+    { project_id: proj.id, title: 'Member-made task', assignee_id: outsiderId, difficulty: 'easy' });
+  ok('a member can create a task on their own project', memberTask.status === 200);
+  ok('...but it lands on themselves, not on whoever they named',
+     memberTask.body.assignee_id === designerId, `got ${memberTask.body?.assignee_id}`);
+  const editorTask = await call(editor, 'POST', '/api/tasks',
+    { project_id: proj.id, title: 'Editor-made task', assignee_id: designerId, difficulty: 'hard' });
+  ok('an editor can assign work to somebody else', editorTask.body?.assignee_id === designerId);
+  ok('a member cannot reassign an existing task',
+     (await call(designer, 'PATCH', `/api/tasks/${editorTask.body.id}`, { assignee_id: outsiderId })).status === 403);
+  ok('an editor can reassign',
+     (await call(editor, 'PATCH', `/api/tasks/${editorTask.body.id}`, { assignee_id: editorId })).status === 200);
+  ok('an editor still cannot change what the client sees',
+     (await call(editor, 'PATCH', `/api/tasks/${editorTask.body.id}`, { visibility: 'client_visible' })).status === 403);
+  ok('an editor still has no finance', (await call(editor, 'GET', '/api/finance/summary')).status === 403);
+
+  section('"Requires a file upload?" (§2)');
+  const needsFile = (await call(owner, 'POST', '/api/tasks',
+    { project_id: proj.id, title: 'Deliver the cut', assignee_id: designerId, requires_file: true })).body;
+  const closeEmpty = await call(owner, 'PATCH', `/api/tasks/${needsFile.id}`, { status: 'completed' });
+  ok('a task needing a file cannot be closed empty', closeEmpty.status === 400, `got ${closeEmpty.status}`);
+  await withRls(pool, { userId: ownerId, role: 'owner', companyId: null }, c =>
+    c.query(`INSERT INTO files(task_id,name,storage_path,uploaded_by) VALUES($1,'cut.mp4','x',$2)`,
+            [needsFile.id, ownerId]));
+  ok('...and closes once something is attached',
+     (await call(owner, 'PATCH', `/api/tasks/${needsFile.id}`, { status: 'completed' })).status === 200);
+
+  section('Points and the leaderboard (§5)');
+  // Same difficulty, three different outcomes.
+  const scored = async (title, difficulty, dueOffset, done) => {
+    const t = (await call(owner, 'POST', '/api/tasks',
+      { project_id: proj.id, title, assignee_id: designerId, difficulty,
+        due_date: new Date(Date.now() + dueOffset * 86400000).toISOString().slice(0, 10) })).body;
+    if (done) await call(owner, 'PATCH', `/api/tasks/${t.id}`, { status: 'completed' });
+    return t;
+  };
+  await scored('early hard', 'hard', 5, true);
+  await scored('late easy', 'easy', -5, true);
+  const dropped = await scored('abandoned', 'medium', -3, false);
+  await call(owner, 'POST', `/api/performance/tasks/${dropped.id}/missed`, { missed: true });
+
+  const board = (await call(designer, 'GET', '/api/performance/leaderboard')).body;
+  const meRow = board.leaderboard.find(x => x.user_id === designerId);
+  ok('the leaderboard ranks the team', Array.isArray(board.leaderboard) && board.leaderboard.length >= 2);
+  ok('early work scores above its difficulty', meRow && meRow.early >= 1);
+  ok('late work is counted as late', meRow && meRow.late >= 1);
+  ok('an abandoned task is a penalty, not a zero', meRow && meRow.missed >= 1);
+  ok('everyone on the team appears, including people with no points',
+     board.leaderboard.some(x => x.points === 0) || board.leaderboard.length >= 3);
+  ok('a badge is derived from the points', 'badge' in meRow);
+  ok('the leaderboard says how far the next badge is', 'next_badge' in meRow);
+  ok('a member can see the leaderboard', board.leaderboard.length > 0);
+  ok('a member cannot write a task off as missed',
+     (await call(designer, 'POST', `/api/performance/tasks/${dropped.id}/missed`, { missed: false })).status === 403);
+
+  const stats = await call(owner, 'GET', '/api/performance/stats');
+  ok('the owner gets the same data as a plain table', stats.status === 200 && stats.body.rows.length >= 2);
+  ok('the owner table carries no game layer',
+     !JSON.stringify(stats.body).includes('badge') && !JSON.stringify(stats.body).includes('rank'));
+  ok('a member cannot open the owner stats table',
+     (await call(designer, 'GET', '/api/performance/stats')).status === 403);
+  ok('a client cannot reach performance at all',
+     (await call(client, 'GET', '/api/performance/leaderboard')).status === 403);
+
+  section('Timeline and phases (§6)');
+  const phase = await call(owner, 'POST', `/api/calendar/projects/${proj.id}/phases`,
+    { name: 'Production', starts_on: '2026-08-01', ends_on: '2026-08-20' });
+  ok('the owner can add a phase', phase.status === 200);
+  ok('a member cannot add a phase',
+     (await call(designer, 'POST', `/api/calendar/projects/${proj.id}/phases`, { name: 'Nope' })).status === 403);
+  const cal = await call(designer, 'GET', '/api/calendar');
+  ok('the team sees the all-projects timeline', cal.status === 200 && cal.body.length >= 1);
+  ok('a client sees their phases through the portal',
+     (await call(client, 'GET', '/api/portal')).body.phases.length >= 1);
+  ok('a client cannot reach the internal calendar',
+     (await call(client, 'GET', '/api/calendar')).status === 403);
+
+  section('Client contacts and join links (§7)');
+  const contact = await call(owner, 'POST', `/api/companies/${acme.id}/contacts`,
+    { name: 'Second Person', position: 'Brand manager', email: 'x@acme.test', is_main: false });
+  ok('several contacts can be recorded against one client', contact.status === 200);
+  const companyDetail = await call(owner, 'GET', `/api/companies/${acme.id}`);
+  ok('the client record carries its contacts', companyDetail.body.contacts.length >= 1);
+
+  const invite = await call(owner, 'POST', '/api/invites', { role: 'client', company_id: acme.id, name: 'Invited' });
+  ok('adding a client mints a join link', invite.status === 200 && !!invite.body.url);
+  const token = invite.body.token;
+  ok('the link describes itself before anyone signs up',
+     (await call(null, 'GET', `/api/invite/${token}`)).body.role === 'client');
+  const accepted = await call(null, 'POST', `/api/invite/${token}/accept`,
+    { name: 'Invited Person', phone: '+998900000009', pin: '4321' });
+  ok('the invitee sets their own PIN and is signed straight in',
+     accepted.status === 200 && !!accepted.body.token && accepted.body.role === 'client');
+  ok('the same link cannot be used twice',
+     (await call(null, 'POST', `/api/invite/${token}/accept`,
+       { name: 'Someone Else', phone: '+998900000010', pin: '5555' })).status === 410);
+  const invitedPortal = await call(accepted.body.token, 'GET', '/api/portal');
+  ok('the invited client lands scoped to their own company',
+     invitedPortal.status === 200 && invitedPortal.body.company.id === acme.id);
+  ok('a member cannot mint invite links',
+     (await call(designer, 'POST', '/api/invites', { role: 'teammate' })).status === 403);
+
+  section('Settings (§12)');
+  ok('a member cannot read settings', (await call(designer, 'GET', '/api/settings')).status === 403);
+  const st = await call(owner, 'GET', '/api/settings');
+  ok('settings come back with defaults filled in', st.status === 200 && st.body.settings.points_hard === '20');
+  await call(owner, 'PUT', '/api/settings', { points_hard: '30', timezone: 'Asia/Tashkent' });
+  const retuned = (await call(owner, 'GET', '/api/settings')).body.settings;
+  ok('the owner can retune the point values', retuned.points_hard === '30');
+  // Proves the values are actually read by the database, not just stored.
+  const hardTask = await scored('retuned hard', 'hard', 5, true);
+  const afterRetune = await withRls(pool, { userId: ownerId, role: 'owner', companyId: null }, c =>
+    c.query('SELECT points FROM points_events WHERE task_id=$1', [hardTask.id]).then(r => r.rows[0]));
+  ok('retuned points take effect immediately in scoring',
+     afterRetune && afterRetune.points === 32, `got ${afterRetune && afterRetune.points}`);
+  await call(owner, 'PUT', '/api/settings', { points_hard: '20' });
+  ok('unknown keys are ignored rather than stored',
+     (await call(owner, 'PUT', '/api/settings', { nonsense: 'x' })).status === 400);
+
+  section('The ledger (§9)');
+  const acctRes = await call(accountant, 'POST', '/api/finance/accounts',
+    { name: 'Payme', purpose: 'Small payments', opening_balance: 1000000 });
+  ok('an account can be opened', acctRes.status === 200);
+  const owed = await call(accountant, 'POST', '/api/finance/transactions',
+    { direction: 'in', counterparty: 'Acme Tea', amount: 5000000, category: 'project_fee',
+      settled: false, due_on: '2026-12-01', account_id: acctRes.body.id });
+  ok('money can be booked before it moves', owed.status === 200 && owed.body.settled === false);
+  ok('unsettled money has no payment date by definition', owed.body.paid_on === null);
+  const badCat = await call(accountant, 'POST', '/api/finance/transactions',
+    { direction: 'in', amount: 100, category: 'payroll' });
+  ok('a cost category is refused on income', badCat.status === 400, `got ${badCat.status}`);
+  const finBefore = (await call(accountant, 'GET', '/api/finance/summary')).body;
+  await call(accountant, 'POST', `/api/finance/transactions/${owed.body.id}/settle`, {});
+  const finAfter = (await call(accountant, 'GET', '/api/finance/summary')).body;
+  ok('settling moves cash without changing profit',
+     finAfter.net_profit === finBefore.net_profit && finAfter.received > finBefore.received);
+  ok('settling twice is refused',
+     (await call(accountant, 'POST', `/api/finance/transactions/${owed.body.id}/settle`, {})).status === 409);
+  ok('the six-month chart returns six months',
+     (await call(accountant, 'GET', '/api/finance/monthly')).body.length === 6);
+  ok('accounts report a running balance',
+     (await call(accountant, 'GET', '/api/finance/accounts')).body.some(a => 'balance' in a));
+
   section('Direct database probe — with every route bypassed');
   // The routes could all be wrong and this would still have to hold.
   const asClient = fn => withRls(pool, { userId: clientId, role: 'client', companyId: acme.id }, fn);
   const raw = await asClient(async c => ({
     tasks: (await c.query('SELECT title FROM tasks')).rows.map(r => r.title),
     comments: (await c.query('SELECT body FROM comments')).rows.map(r => r.body),
-    invoices: (await c.query('SELECT number FROM invoices')).rows.length,
+    money: (await c.query('SELECT id FROM transactions')).rows.length,
+    accounts: (await c.query('SELECT id FROM accounts')).rows.length,
+    points: (await c.query('SELECT task_id FROM points_events')).rows.length,
+    contacts: (await c.query('SELECT id FROM client_contacts')).rows.length,
     scope: (await c.query('SELECT id FROM scope_alerts')).rows.length,
     companies: (await c.query('SELECT name FROM companies')).rows.map(r => r.name),
     projects: (await c.query('SELECT name FROM projects')).rows.map(r => r.name),
@@ -303,7 +469,10 @@ async function main() {
      raw.tasks.length === 1 && raw.tasks[0] === 'Key visual', raw.tasks.join('|'));
   ok('raw SELECT * on comments returns no internal comment',
      !raw.comments.some(b => b.includes('INTERNAL-GRUMBLE')));
-  ok('raw SELECT * on invoices returns nothing', raw.invoices === 0);
+  ok('raw SELECT * on the money ledger returns nothing', raw.money === 0);
+  ok('raw SELECT * on accounts returns nothing', raw.accounts === 0);
+  ok('raw SELECT * on points returns nothing — clients never see performance', raw.points === 0);
+  ok('a client sees only their own company contacts', raw.contacts >= 0 && raw.contacts <= 2);
   ok('raw SELECT * on scope_alerts returns nothing', raw.scope === 0);
   ok('raw SELECT * on companies returns only their own', raw.companies.length === 1);
   ok("raw SELECT * on projects excludes the other client's", raw.projects.length === 1);
@@ -311,10 +480,15 @@ async function main() {
   const asOutsider = fn => withRls(pool, { userId: outsiderId, role: 'teammate', companyId: null }, fn);
   const outsiderRaw = await asOutsider(async c => ({
     tasks: (await c.query('SELECT id FROM tasks')).rows.length,
-    invoices: (await c.query('SELECT id FROM invoices')).rows.length,
+    money: (await c.query('SELECT id FROM transactions')).rows.length,
+    points: (await c.query('SELECT task_id FROM points_events')).rows.length,
   }));
   ok('a non-member teammate sees no tasks at the database level', outsiderRaw.tasks === 0);
-  ok('a teammate sees no invoices at the database level', outsiderRaw.invoices === 0);
+  ok('a teammate sees no money at the database level', outsiderRaw.money === 0);
+  // The leaderboard is meant to be seen by the team, so this one is NOT zero —
+  // asserted so that it stays a deliberate choice rather than an oversight.
+  ok('a teammate CAN see points — the leaderboard is team-facing by design',
+     outsiderRaw.points > 0, `saw ${outsiderRaw.points}`);
 
   const unconfigured = await withRls(pool, {}, async c =>
     (await c.query('SELECT count(*)::int AS n FROM tasks')).rows[0].n);

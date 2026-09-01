@@ -52,10 +52,13 @@ app.post('/api/tg/auth', wrap(async (req, res) => {
 // Order matters. The work and people routers are mounted on bare '/api' and
 // apply a staff-only gate to everything beneath it, so the surfaces with their
 // own audience — the client portal above all — have to be matched first.
-app.use('/api/portal',  require('./routes/portal')(deps));
-app.use('/api/files',   require('./routes/files')(deps));
-app.use('/api/finance', require('./routes/finance')(deps));
-app.use('/api/reports', require('./routes/reports')(deps));
+app.use('/api/portal',      require('./routes/portal')(deps));
+app.use('/api/files',       require('./routes/files')(deps));
+app.use('/api/finance',     require('./routes/finance')(deps));
+app.use('/api/reports',     require('./routes/reports')(deps));
+app.use('/api/performance', require('./routes/performance')(deps));
+app.use('/api/calendar',    require('./routes/calendar')(deps));
+app.use('/api/settings',    require('./routes/settings')(deps));
 app.use('/api', require('./routes/auth')(deps));
 app.use('/api', require('./routes/work')(deps));
 app.use('/api', require('./routes/people')(deps));
@@ -91,6 +94,7 @@ app.post('/api/admin/tenants/:id/mark-paid', platformAdmin, wrap(async (req, res
 // the client portal ships none of the internal code at all.
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/portal*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'portal', 'index.html')));
+app.get('/join/*',  (req, res) => res.sendFile(path.join(__dirname, 'public', 'join', 'index.html')));
 app.get('/tg*',     (req, res) => res.sendFile(path.join(__dirname, 'public', 'tg', 'index.html')));
 app.get('*',        (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
@@ -109,8 +113,14 @@ db.init()
     // report goes out on Mondays.
     const dailyTick = async () => {
       try {
-        for (const t of await db.listTenants())
-          await runAlerts(asSystem, getTenantPool(t.db_name)).catch(e => console.error('alerts:', e.message));
+        const { snapshotWeek } = require('./routes/reports');
+        for (const t of await db.listTenants()) {
+          const pool = getTenantPool(t.db_name);
+          await runAlerts(asSystem, pool).catch(e => console.error('alerts:', e.message));
+          // Records Monday's starting percentage once per project per week, so
+          // the weekly report has something to compare today against.
+          await snapshotWeek(fn => asSystem(pool, fn)).catch(e => console.error('snapshot:', e.message));
+        }
         if (new Date().getDay() === 1) await telegram.pushWeeklyReports().catch(() => {});
         await require('./scripts/backup').runBackups().catch(e => console.error('backup:', e.message));
       } catch (e) { console.error('daily tick failed:', e.message); }

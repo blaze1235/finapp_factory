@@ -4,7 +4,21 @@
    internal field on this page to accidentally reveal, and no internal endpoint
    for a curious browser console to call. */
 
-const P = { me: null, data: null };
+const P = { me: null, data: null, tab: 'project' };
+const TABS = {
+  uz: { project: 'Loyiha', deliverables: 'Ishlar', timeline: 'Muddatlar', documents: 'Hujjatlar' },
+  ru: { project: 'Проект', deliverables: 'Работы', timeline: 'Сроки', documents: 'Документы' },
+  en: { project: 'Project', deliverables: 'Deliverables', timeline: 'Timeline', documents: 'Documents' },
+};
+const tl = k => (TABS[Store.lang] || TABS.en)[k];
+// The six named stages the client is shown (§2).
+const CLIENT_STAGES = ['brief', 'concept', 'production', 'review', 'approval', 'delivery'];
+const STAGE_TEXT = {
+  uz: { brief: 'Brif', concept: 'Konsept', production: 'Ishlab chiqarish', review: 'Koʻrib chiqish', approval: 'Tasdiqlash', delivery: 'Topshirish' },
+  ru: { brief: 'Бриф', concept: 'Концепт', production: 'Производство', review: 'Ревью', approval: 'Утверждение', delivery: 'Сдача' },
+  en: { brief: 'Brief', concept: 'Concept', production: 'Production', review: 'Review', approval: 'Approval', delivery: 'Delivery' },
+};
+const st = k => (STAGE_TEXT[Store.lang] || STAGE_TEXT.en)[k] || k;
 const root = () => document.getElementById('root');
 
 function renderLogin(err) {
@@ -58,7 +72,8 @@ async function render() {
         h('button', { class: Store.lang === l ? 'on' : '', onclick: () => { Store.lang = l; render(); } }, l.toUpperCase()))),
       h('button', { class: 'btn sm ghost', onclick: () => { Store.token = null; location.reload(); } }, '⏻'))));
 
-  // Anything waiting on the client comes first and is impossible to miss.
+  // Anything waiting on the client outranks the tabs — it is the one thing
+  // they might have come here to do.
   if (d.awaiting.length) {
     const box = h('div', { class: 'needs' }, h('h2', bl('needs_you') + ' · ' + d.awaiting.length));
     for (const tk of d.awaiting) box.append(h('div', { class: 'deliv', onclick: () => openDeliverable(tk.id) },
@@ -69,40 +84,135 @@ async function render() {
     page.append(box);
   }
 
-  for (const p of d.projects) {
-    page.append(h('div', { class: 'card', style: { marginTop: '16px' } },
-      h('div', { class: 'row', style: { marginBottom: '10px' } },
-        h('div', {}, h('b', p.name), p.description ? h('div', { class: 'tiny dim' }, p.description) : null),
-        p.due ? h('span', { class: 'pill sp' }, fmtDate(p.due)) : null),
-      h('div', { class: 'bar acc' }, h('i', { style: { width: (p.progress_pct || 0) + '%' } })),
-      // The bar is always next to the plain count, so a weighted number can
-      // never be mistaken for a claim that things are finished.
-      h('div', { class: 'row tiny dim', style: { marginTop: '6px' } },
-        h('span', `${p.progress_pct}% ${t('progress').toLowerCase()}`),
-        h('span', { class: 'sp' }, t('delivered', { done: p.delivered, total: p.deliverables })))));
+  page.append(h('div', { class: 'seg', style: { marginBottom: '18px' } },
+    ...Object.keys(TABS.en).map(k => h('button', {
+      class: P.tab === k ? 'on' : '', onclick: () => { P.tab = k; render(); },
+    }, tl(k)))));
 
-    const mine = d.tasks.filter(tk => tk.project_id === p.id);
-    for (const bucket of ['needs_you', 'in_progress', 'coming_up', 'done']) {
-      const group = mine.filter(tk => tk.bucket === bucket);
-      if (!group.length) continue;
-      page.append(h('div', { class: 'bucket-t' }, bl(bucket)));
-      for (const tk of group) page.append(h('div', { class: 'deliv', onclick: () => openDeliverable(tk.id) },
-        h('div', { class: 'row' },
-          h('div', {},
-            h('div', { class: 't' }, tk.title),
-            h('div', { class: 'tiny dim' },
-              [tk.assignee, tk.due ? fmtDate(tk.due) : null, tk.version ? `v${tk.version}` : null]
-                .filter(Boolean).join(' · '))),
-          bucket === 'needs_you' ? h('span', { class: 'pill acc sp' }, '⏳') :
-          bucket === 'done' ? h('span', { class: 'pill ok sp' }, '✓') : null)));
-    }
-  }
-
-  if (!d.projects.length) page.append(h('div', { class: 'card' },
-    h('div', { class: 'empty' }, h('div', { class: 'big' }, '◍'), 'Hozircha faol loyiha yoʻq')));
+  ({ project: tabProject, deliverables: tabDeliverables,
+     timeline: tabTimeline, documents: tabDocuments }[P.tab])(page, d);
 
   page.append(h('div', { class: 'tiny dim', style: { marginTop: '30px', textAlign: 'center' } },
     'Savol boʻlsa akkaunt menejeringizga Telegramda yozing.'));
+}
+
+// The hero: one project at a glance, with the stage pipeline and a big number.
+function tabProject(page, d) {
+  if (!d.projects.length) return page.append(h('div', { class: 'card' },
+    h('div', { class: 'empty' }, h('div', { class: 'big' }, '◍'), 'Hozircha faol loyiha yoʻq')));
+
+  for (const p of d.projects) {
+    const mine = d.tasks.filter(tk => tk.project_id === p.id);
+    page.append(h('div', { class: 'card', style: { marginBottom: '14px' } },
+      h('div', { class: 'row', style: { alignItems: 'flex-start', marginBottom: '14px' } },
+        h('div', {},
+          h('div', { style: { fontSize: '18px', fontWeight: 650 } }, p.name),
+          p.description ? h('div', { class: 'tiny dim' }, p.description) : null,
+          p.due ? h('div', { class: 'tiny dim', style: { marginTop: '4px' } },
+            'Topshirish: ' + fmtDate(p.due)) : null),
+        h('div', { class: 'ring sp' },
+          h('svg', { viewBox: '0 0 44 44', width: '78', height: '78' },
+            h('circle', { cx: 22, cy: 22, r: 19, fill: 'none', stroke: 'var(--surface-2)', 'stroke-width': 5 }),
+            h('circle', { cx: 22, cy: 22, r: 19, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 5,
+              'stroke-linecap': 'round', transform: 'rotate(-90 22 22)',
+              'stroke-dasharray': `${(p.progress_pct / 100) * 119.4} 119.4` })),
+          h('div', { class: 'ring-n' }, p.progress_pct + '%'))),
+      // Stage pipeline, current stage highlighted.
+      h('div', { class: 'row', style: { gap: '4px', flexWrap: 'wrap', marginBottom: '10px' } },
+        ...CLIENT_STAGES.map(sk => h('span', {
+          class: 'pill' + (sk === p.stage ? ' acc' : ''),
+          style: { opacity: sk === p.stage ? 1 : .5, fontWeight: sk === p.stage ? 700 : 500 },
+        }, st(sk)))),
+      h('div', { class: 'tiny dim' }, t('delivered', { done: p.delivered, total: p.deliverables }))));
+
+    const ready = mine.filter(tk => tk.bucket === 'done');
+    const rest = mine.filter(tk => tk.bucket !== 'done' && !tk.needs_you);
+    if (rest.length) {
+      page.append(h('div', { class: 'bucket-t' }, bl('in_progress')));
+      for (const tk of rest) page.append(delivRow(tk));
+    }
+    if (ready.length) {
+      page.append(h('div', { class: 'bucket-t' }, bl('done')));
+      for (const tk of ready) page.append(delivRow(tk));
+    }
+  }
+}
+
+function delivRow(tk) {
+  return h('div', { class: 'deliv', onclick: () => openDeliverable(tk.id) },
+    h('div', { class: 'row' },
+      h('div', {},
+        h('div', { class: 't' }, tk.title),
+        // Deliberately no assignee: the revised spec says the client is not
+        // shown who is doing the work.
+        h('div', { class: 'tiny dim' },
+          [tk.due ? fmtDate(tk.due) : null, tk.version ? `v${tk.version}` : null].filter(Boolean).join(' · '))),
+      tk.needs_you ? h('span', { class: 'pill acc sp' }, '⏳')
+        : tk.bucket === 'done' ? h('span', { class: 'pill ok sp' }, '✓')
+        : h('span', { class: 'pill sp' }, bl(tk.bucket))));
+}
+
+function tabDeliverables(page, d) {
+  if (!d.tasks.length) return page.append(h('div', { class: 'card' },
+    h('div', { class: 'empty' }, 'Hali ish yoʻq')));
+  for (const bucket of ['needs_you', 'in_progress', 'coming_up', 'done']) {
+    const group = d.tasks.filter(tk => tk.bucket === bucket);
+    if (!group.length) continue;
+    page.append(h('div', { class: 'bucket-t' }, bl(bucket)));
+    for (const tk of group) page.append(h('div', { class: 'deliv', onclick: () => openDeliverable(tk.id) },
+      h('div', { class: 'row' },
+        h('div', {},
+          h('div', { class: 't' }, tk.title),
+          h('div', { class: 'tiny dim' },
+            [projectName(tk), tk.version ? `v${tk.version} · ${tk.version_count} versiya` : null,
+             tk.due ? fmtDate(tk.due) : null].filter(Boolean).join(' · '))),
+        tk.needs_you
+          ? h('span', { class: 'btn sm pri sp' }, 'Qaror kerak')
+          : h('span', { class: `pill sp ${bucket === 'done' ? 'ok' : ''}` }, bl(bucket)))));
+  }
+}
+
+// The client's timeline: their project's phases, scoped to them.
+function tabTimeline(page, d) {
+  if (!d.phases.length && !d.projects.length) return page.append(h('div', { class: 'card' },
+    h('div', { class: 'empty' }, 'Muddatlar hali belgilanmagan')));
+  for (const p of d.projects) {
+    const phases = d.phases.filter(ph => ph.project_id === p.id);
+    const dates = [...phases.flatMap(ph => [ph.starts_on, ph.ends_on]), p.starts_on, p.due]
+      .filter(Boolean).map(x => Date.parse(String(x).slice(0, 10)));
+    if (!dates.length) continue;
+    const min = Math.min(...dates, Date.now()), max = Math.max(...dates, Date.now());
+    const span = Math.max(1, max - min);
+    const pct = x => ((Date.parse(String(x).slice(0, 10)) - min) / span) * 100;
+
+    page.append(h('div', { class: 'card', style: { marginBottom: '12px' } },
+      h('b', p.name),
+      h('div', { style: { marginTop: '12px' } }, ...phases.map(ph => h('div', { style: { marginBottom: '11px' } },
+        h('div', { class: 'row tiny' }, h('span', ph.name),
+          h('span', { class: 'sp dim' },
+            [ph.starts_on && fmtDate(ph.starts_on), ph.ends_on && fmtDate(ph.ends_on)].filter(Boolean).join(' → '))),
+        h('div', { class: 'ptrack' },
+          ph.starts_on && ph.ends_on
+            ? h('i', { style: { left: pct(ph.starts_on) + '%',
+                                width: Math.max(2, pct(ph.ends_on) - pct(ph.starts_on)) + '%' } })
+            : null,
+          h('span', { class: 'pnow', style: { left: pct(new Date().toISOString().slice(0, 10)) + '%' } }))))),
+      p.due ? h('div', { class: 'row tiny', style: { marginTop: '6px', paddingTop: '9px',
+                                                     borderTop: '1px solid var(--line-soft)' } },
+        h('b', 'Topshirish'), h('span', { class: 'sp mono' }, fmtDate(p.due))) : null));
+  }
+}
+
+function tabDocuments(page, d) {
+  if (!d.documents.length) return page.append(h('div', { class: 'card' },
+    h('div', { class: 'empty' }, h('div', { class: 'big' }, '📄'), 'Hujjat qoʻshilmagan')));
+  for (const f of d.documents) page.append(h('a', {
+    class: 'deliv', href: '#', style: { display: 'block' }, onclick: e => openFile(e, f.id),
+  },
+    h('div', { class: 'row' },
+      h('div', {}, h('div', { class: 't' }, '📄 ' + f.name),
+        h('div', { class: 'tiny dim' }, fmtWhen(f.created_at))),
+      h('span', { class: 'btn sm sp' }, 'Ochish'))));
 }
 
 const projectName = tk => (P.data.projects.find(p => p.id === tk.project_id) || {}).name || '';
@@ -115,8 +225,8 @@ async function openDeliverable(id) {
     clear(box);
     box.append(h('div', { class: 'drawer-head' }, h('div', { class: 'row' },
       h('div', {}, h('h1', { style: { fontSize: '18px', fontWeight: 650 } }, tk.title),
-        h('div', { class: 'tiny dim' }, [projectName(tk), tk.version ? `v${tk.version}` : null,
-          tk.assignee].filter(Boolean).join(' · '))),
+        h('div', { class: 'tiny dim' }, [projectName(tk), tk.version ? `v${tk.version}` : null]
+          .filter(Boolean).join(' · '))),
       h('button', { class: 'btn sm ghost sp', onclick: close }, '✕'))));
 
     const body = h('div', { class: 'drawer-body' });

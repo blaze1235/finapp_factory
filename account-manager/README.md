@@ -65,14 +65,44 @@ Approvals are permanent: clients have no UPDATE or DELETE policy on that table.
 
 ---
 
+## What changed in v2 (client's revised spec)
+
+Three decisions here **reverse** what the first brief asked for, at the client's
+written request. They are marked REVERSAL in `lib/schema.sql` so nobody later
+"fixes" them back:
+
+| First brief | Now |
+|---|---|
+| "Assignee names are shown to clients. The client asked for this." | Team members are **not** visible on the client's view. `v_client_tasks` no longer carries `assignee_id` at all, so no portal query can reintroduce it. |
+| "Deliberately no per-person productivity counts." | Full performance tracking: difficulty points, festival badges, monthly reset, plus an owner-facing stats table. |
+| Five pipeline stages | Six named ones: Brief → Concept → Production → Review → Approval → Delivery |
+
+**One judgement call.** §9 describes accounts and a transactions ledger and
+never mentions invoices or line items, so the invoices/payments model collapsed
+into that ledger rather than running two overlapping ones. An income row with
+`settled = false` **is** "unpaid to us" — it lifts profit and leaves cash alone,
+which is exactly the profit-vs-cash split §9 asks to be displayed. Existing
+invoices are migrated into transactions on deploy, then the old tables dropped.
+
+Also new: a fifth permission level (**Editor** — assigns work, no finance),
+My tasks, Calendar/Timeline with owner-editable phases, client contacts,
+join links that let an invitee set their own PIN, Documents for clients,
+a Settings page, and weekly progress snapshots so the report can show where
+each project stood on Monday against where it stands now.
+
 ## Roles
 
 | Role | Sees | Enforced by |
 |---|---|---|
 | **Owner / Account manager** | Everything | — |
-| **Accountant** | Finance and client records. **No tasks at all** — not a filtered view of tasks, none. | No policy on `tasks` for this role |
-| **Teammate** | Projects they are a member of. No finance. Cannot change visibility, assignees, client deadlines or the revision counter. | RLS + `trg_task_field_guard` |
-| **Client** | Only client-visible items on their own company's projects | RLS + the `v_client_*` views |
+| **Accountant** | Finance, clients, projects. **No tasks at all** — not a filtered view of tasks, none. | No policy on `tasks` for this role |
+| **Editor** | Their own projects, and may assign work to other people. No finance. | RLS + `trg_task_field_guard` |
+| **Member** | Their own projects; updates their own tasks. Cannot assign. | RLS + `trg_task_field_guard` |
+| **Client** | Only client-visible items on their own company's projects, and never who is doing them | RLS + the `v_client_*` views |
+
+Neither an editor nor a member can change visibility, client deadlines, the
+revision counter, a task's difficulty, or write work off as missed — the last
+two because they decide points.
 
 The owner account is created at provisioning and there is no invite path to it.
 
@@ -135,7 +165,7 @@ npm test
 ```
 
 `scripts/flow-test.js` drives the whole product over real HTTP against a
-throwaway agency, then drops it — 75 checks. The visibility ones are the point;
+throwaway agency, then drops it — **139 checks**. The visibility ones are the point;
 each is a client relationship that a forgotten filter would have destroyed. The
 last section re-proves the boundaries **with every route bypassed**, querying
 the database directly as each role, so the routes could all be wrong and it
@@ -192,6 +222,8 @@ would still have to hold.
 
 ```
 lib/schema.sql      the access-control document — read this first
+routes/performance.js one dataset, two framings: leaderboard vs management table
+routes/calendar.js  all-projects timeline, and owner-editable phases per project
 lib/rls.js          the only sanctioned way to touch a tenant database
 lib/telegram.js     bot, Mini App auth, outbound
 lib/alerts.js       daily nags: late work, stale approvals, undecided scope

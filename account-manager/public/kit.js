@@ -147,6 +147,93 @@ const short = (n) => {
   return String(n);
 };
 
+// ---- shared visual pieces --------------------------------------------------
+// Initials on a fixed per-person colour, so the same face is the same colour on
+// every card, row and stack in the product.
+const initials = name => String(name || '?').trim().split(/\s+/).slice(0, 2)
+  .map(w => w[0]).join('').toUpperCase();
+
+const AVATAR_COLORS = ['#b45309', '#1d4ed8', '#15803d', '#7c3aed', '#be123c', '#0f766e', '#a16207', '#4338ca'];
+const colorFor = (seed) => {
+  if (typeof seed === 'string' && seed.startsWith('#')) return seed;
+  const n = typeof seed === 'number' ? seed
+    : String(seed || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  return AVATAR_COLORS[Math.abs(n) % AVATAR_COLORS.length];
+};
+
+function avatar(name, seed, size = 26) {
+  return h('span', {
+    class: 'av', title: name || '',
+    style: { width: size + 'px', height: size + 'px', background: colorFor(seed ?? name),
+             fontSize: Math.round(size * 0.4) + 'px' },
+  }, initials(name));
+}
+
+// A stack of faces, with an overflow count rather than an unbounded row.
+function avatars(names, max = 4) {
+  const shown = (names || []).slice(0, max);
+  return h('span', { class: 'av-stack' },
+    ...shown.map(n => avatar(n, n, 24)),
+    (names || []).length > max
+      ? h('span', { class: 'av', style: { width: '24px', height: '24px', background: 'var(--surface-2)',
+          color: 'var(--ink-2)', fontSize: '10px' } }, '+' + (names.length - max))
+      : null);
+}
+
+// Two series, six buckets. Deliberately tiny and unlabelled inline — the full
+// numbers live in the report; this is a glance, not a chart.
+function sparkline(rows, aKey, bKey, { height = 34 } = {}) {
+  const max = Math.max(1, ...rows.map(r => Math.max(Number(r[aKey]) || 0, Number(r[bKey]) || 0)));
+  return h('div', { class: 'spark' }, ...rows.map(r => h('div', { class: 'spark-col', title: `${r.week || r.month}` },
+    h('div', { class: 'spark-pair', style: { height: height + 'px' } },
+      h('i', { class: 'a', style: { height: Math.round((Number(r[aKey]) || 0) / max * height) + 'px' },
+               title: `${aKey}: ${r[aKey]}` }),
+      h('i', { class: 'b', style: { height: Math.round((Number(r[bKey]) || 0) / max * height) + 'px' },
+               title: `${bKey}: ${r[bKey]}` })),
+    h('div', { class: 'spark-x' }, sparkLabel(r)))));
+}
+
+// '2026-04' reads better as 'apr'; a week bucket stays as its date.
+function sparkLabel(r) {
+  if (r.month && /^\d{4}-\d{2}$/.test(r.month)) return t('months')[Number(r.month.slice(5, 7)) - 1];
+  return String(r.week || r.month || '').slice(-5);
+}
+
+// A labelled horizontal bar, used by the category breakdowns.
+function hbar(label, value, max, note) {
+  return h('div', { class: 'hbar' },
+    h('div', { class: 'row tiny' }, h('span', label), h('span', { class: 'sp mono' }, note ?? short(value))),
+    h('div', { class: 'bar', style: { marginTop: '3px' } },
+      h('i', { style: { width: Math.round((Number(value) || 0) / Math.max(1, max) * 100) + '%' } })));
+}
+
+// Named after creative festivals, low to high. The names are proper nouns and
+// stay as they are; only the reason you earned one is translated.
+const BADGE_LOOK = {
+  taf:     { label: 'TAF',         color: '#a16207' },
+  jolbors: { label: 'Jolbors',     color: '#0f766e' },
+  baku:    { label: 'Baku Flames', color: '#b45309' },
+  cannes:  { label: 'Cannes',      color: '#7c3aed' },
+};
+const BADGE_HINT = {
+  uz: { taf: 'Birinchi yakunlangan ishlar', jolbors: 'Bir oy — bironta ham kechikmagan',
+        baku: 'Yuqori ball toʻplami', cannes: 'Alohida ajralib turgan oy' },
+  ru: { taf: 'Первые выполненные задачи', jolbors: 'Месяц без опозданий',
+        baku: 'Высокая сумма баллов', cannes: 'Выдающийся месяц' },
+  en: { taf: 'First tasks completed', jolbors: 'A month with nothing late',
+        baku: 'Strong point total', cannes: 'A standout month' },
+};
+const badgeHint = k => (BADGE_HINT[Store.lang] || BADGE_HINT.en)[k] || '';
+
+function badgeChip(key) {
+  const b = BADGE_LOOK[key];
+  if (!b) return null;
+  return h('span', { class: 'badge-chip', title: badgeHint(key),
+                     style: { borderColor: b.color, color: b.color } }, b.label);
+}
+
+const DIFFICULTY = { easy: 'Oson', medium: 'Oʻrtacha', hard: 'Qiyin' };
+
 // ---- i18n -------------------------------------------------------------------
 // Open question 5: Latin Uzbek is the default — it is what the business writes
 // in — with Russian and English alongside, because agency teams here switch
@@ -159,6 +246,7 @@ const STRINGS = {
     minsAgo: '{n} daq oldin', hoursAgo: '{n} soat oldin', daysAgo: '{n} kun oldin',
     cancel: 'Bekor qilish', confirm: 'Tasdiqlash', save: 'Saqlash', close: 'Yopish',
     nav_today: 'Bugun', nav_projects: 'Loyihalar', nav_clients: 'Mijozlar',
+    nav_mytasks: 'Ishlarim', nav_calendar: 'Kalendar', nav_team_perf: 'Reyting', nav_team_stats: 'Koʻrsatkichlar',
     nav_finance: 'Moliya', nav_team: 'Jamoa', nav_report: 'Hisobot', nav_settings: 'Sozlamalar',
     signIn: 'Kirish', phone: 'Telefon', pin: 'PIN kod',
     waitingOnClients: 'Mijozlarda turibdi', myWork: 'Mening ishim', atRisk: 'Muddati yaqin',
@@ -178,6 +266,7 @@ const STRINGS = {
     minsAgo: '{n} мин назад', hoursAgo: '{n} ч назад', daysAgo: '{n} дн назад',
     cancel: 'Отмена', confirm: 'Подтвердить', save: 'Сохранить', close: 'Закрыть',
     nav_today: 'Сегодня', nav_projects: 'Проекты', nav_clients: 'Клиенты',
+    nav_mytasks: 'Мои задачи', nav_calendar: 'Календарь', nav_team_perf: 'Рейтинг', nav_team_stats: 'Показатели',
     nav_finance: 'Финансы', nav_team: 'Команда', nav_report: 'Отчёт', nav_settings: 'Настройки',
     signIn: 'Войти', phone: 'Телефон', pin: 'PIN-код',
     waitingOnClients: 'У клиентов', myWork: 'Моя работа', atRisk: 'Горит срок',
@@ -197,6 +286,7 @@ const STRINGS = {
     minsAgo: '{n}m ago', hoursAgo: '{n}h ago', daysAgo: '{n}d ago',
     cancel: 'Cancel', confirm: 'Confirm', save: 'Save', close: 'Close',
     nav_today: 'Today', nav_projects: 'Projects', nav_clients: 'Clients',
+    nav_mytasks: 'My tasks', nav_calendar: 'Calendar', nav_team_perf: 'Leaderboard', nav_team_stats: 'Performance',
     nav_finance: 'Finance', nav_team: 'Team', nav_report: 'Report', nav_settings: 'Settings',
     signIn: 'Sign in', phone: 'Phone', pin: 'PIN',
     waitingOnClients: 'With clients', myWork: 'My work', atRisk: 'Due soon',

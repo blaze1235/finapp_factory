@@ -4,7 +4,7 @@
 // unpaid invoice, however it is edited later.
 const express = require('express');
 
-module.exports = ({ auth, only, wrap, getNameMap, notifyStaff, notifyScope }) => {
+module.exports = ({ auth, only, wrap, notifyStaff, notifyScope }) => {
   const r = express.Router();
   r.use(auth, only('client'));
 
@@ -14,15 +14,14 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyStaff, notifyScope }) =>
       const [company] = await q(`SELECT id, name, contact_name FROM companies WHERE id=$1`, [req.user.company_id]);
       const projects = await q(`SELECT * FROM v_client_projects ORDER BY due NULLS LAST, id`);
       const tasks    = await q(`SELECT * FROM v_client_tasks ORDER BY needs_you DESC, due NULLS LAST, id`);
+      // Activity without actor names, for the same reason.
       const activity = await q(
-        `SELECT verb, detail, actor_name, created_at, project_id FROM activity
+        `SELECT verb, detail, created_at, project_id FROM activity
           ORDER BY created_at DESC LIMIT 20`);
-      return { company, projects, tasks, activity };
+      const phases = await q(`SELECT * FROM v_client_phases ORDER BY position, starts_on NULLS LAST`);
+      const documents = await q(`SELECT * FROM v_client_documents ORDER BY created_at DESC`);
+      return { company, projects, tasks, activity, phases, documents };
     });
-    const names = await getNameMap(req.user.tenant_id);
-    // Assignee names are shown to clients. The client asked for this and the
-    // trade-off is understood — a name, never a phone number or a workload.
-    data.tasks = data.tasks.map(t => ({ ...t, assignee: names.get(t.assignee_id) || null, assignee_id: undefined }));
     data.awaiting = data.tasks.filter(t => t.needs_you);
     res.json(data);
   }));
@@ -39,9 +38,6 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyStaff, notifyScope }) =>
       return { task, comments, files, approvals };
     });
     if (!out) return res.status(404).json({ error: 'Not found' });
-    const names = await getNameMap(req.user.tenant_id);
-    out.task.assignee = names.get(out.task.assignee_id) || null;
-    delete out.task.assignee_id;
     res.json(out);
   }));
 

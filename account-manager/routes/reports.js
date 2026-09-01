@@ -36,13 +36,80 @@ async function weeklyReport(runner, { days = 7 } = {}) {
            JOIN projects p ON p.company_id=co.id
            JOIN tasks t ON t.project_id=p.id
           GROUP BY co.name HAVING count(*) > 0 ORDER BY shipped DESC`);
+    // "Progress moved" (§10): where each project stood at the start of the week
+    // versus now. The earlier number has to have been written down, which is
+    // what progress_snapshots is for — snapshotWeek() runs on the daily tick.
+    const progressMoved = await q(`
+      SELECT p.id, p.name, co.name AS company,
+             COALESCE(s.pct, 0) AS was, pr.pct AS now
+        FROM projects p
+        JOIN companies co ON co.id = p.company_id
+        CROSS JOIN LATERAL project_progress(p.id) pr
+        LEFT JOIN progress_snapshots s
+               ON s.project_id = p.id AND s.week_start = date_trunc('week', CURRENT_DATE)::date
+       WHERE NOT p.archived ORDER BY (pr.pct - COALESCE(s.pct,0)) DESC`);
+
+    // Revision rounds used against what the scope allowed, flagged when over.
+    const revisionUsage = await q(`
+      SELECT p.id, p.name, co.name AS company, p.revisions_included,
+             COALESCE(MAX(t.revision_round), 0) AS used,
+             COALESCE(MAX(t.revision_round), 0) > p.revisions_included AS over
+        FROM projects p
+        JOIN companies co ON co.id = p.company_id
+        LEFT JOIN tasks t ON t.project_id = p.id
+       WHERE NOT p.archived
+       GROUP BY p.id, co.name ORDER BY over DESC, used DESC`);
+
+    // Shipped versus slipped over six weeks, for the bar chart.
+    const trend = await q(`
+      SELECT to_char(w.week, 'MM-DD') AS week,
+             (SELECT count(*) FROM tasks t
+               WHERE t.completed_at >= w.week AND t.completed_at < w.week + interval '7 days')::int AS shipped,
+             (SELECT count(*) FROM tasks t
+               WHERE t.due_date >= w.week::date AND t.due_date < (w.week + interval '7 days')::date
+                 AND (t.completed_at IS NULL OR t.completed_at::date > t.due_date))::int AS slipped
+        FROM generate_series(date_trunc('week', CURRENT_DATE) - interval '5 weeks',
+                             date_trunc('week', CURRENT_DATE), interval '1 week') AS w(week)
+       ORDER BY w.week`);
+
+    // Money, on the two bases the finance page uses.
+    const money = (await q(`
+      SELECT COALESCE(SUM(amount) FILTER (WHERE direction='in'),0)::bigint AS invoiced,
+             COALESCE(SUM(amount) FILTER (WHERE direction='in' AND settled),0)::bigint AS received
+        FROM transactions WHERE period >= date_trunc('month', CURRENT_DATE)::date`))[0];
+
+    const rev = revisions[0] || { rounds: 0, on_tasks: 0 };
     return {
       period_days: days,
+      // The one-sentence summary the spec asks for, assembled from the numbers
+      // rather than written by hand so it can never disagree with them.
+      summary: {
+        shipped: shipped.length, slipped: slipped.length,
+        waiting: waiting.length, revision_rounds: rev.rounds,
+      },
       shipped, slipped, waiting,
-      revisions: revisions[0] || { rounds: 0, on_tasks: 0 },
+      revisions: rev,
+      progress_moved: progressMoved,
+      revision_usage: revisionUsage,
+      trend, money,
       scope, by_client: byClient,
       generated_at: new Date().toISOString(),
     };
+  });
+}
+
+// Writes down where every project stands, once per week. Without this the
+// "progress moved" panel has nothing to compare against — you cannot
+// reconstruct last Monday's percentage after the fact.
+async function snapshotWeek(runner) {
+  return runner(async c => {
+    const { rowCount } = await c.query(`
+      INSERT INTO progress_snapshots(project_id, week_start, pct)
+      SELECT p.id, date_trunc('week', CURRENT_DATE)::date, pr.pct
+        FROM projects p CROSS JOIN LATERAL project_progress(p.id) pr
+       WHERE NOT p.archived
+      ON CONFLICT (project_id, week_start) DO NOTHING`);
+    return rowCount;
   });
 }
 
@@ -55,7 +122,7 @@ module.exports = ({ auth, only, wrap }) => {
   }));
 
   // A teammate's own week, and nobody else's.
-  r.get('/my-week', only('teammate', 'owner'), wrap(async (req, res) => {
+  r.get('/my-week', only('teammate', 'owner', 'editor'), wrap(async (req, res) => {
     const me = req.user.id;
     res.json(await req.q(async c => {
       const q = (t, p) => c.query(t, p).then(x => x.rows);
@@ -76,3 +143,4 @@ module.exports = ({ auth, only, wrap }) => {
   return r;
 };
 module.exports.weeklyReport = weeklyReport;
+module.exports.snapshotWeek = snapshotWeek;

@@ -8,52 +8,148 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyUser }) => {
   const r = express.Router();
   // RLS already returns a client nothing here, but an internal endpoint should
   // say no rather than answer politely with an empty list.
-  r.use(auth, only('owner', 'accountant', 'teammate'));
+  r.use(auth, only('owner', 'accountant', 'teammate', 'editor'));
 
   const nameMap = req => getNameMap(req.user.tenant_id);
 
-  // ---- the command centre -------------------------------------------------
-  // One call, because the first screen of the day should not be six spinners.
-  r.get('/dashboard', only('owner', 'teammate'), wrap(async (req, res) => {
+  // ---- the command centre (§2) -------------------------------------------
+  // One call. The first screen of the day should not be six spinners, and
+  // every count here is a link to the thing it counts.
+  r.get('/dashboard', only('owner', 'teammate', 'editor'), wrap(async (req, res) => {
     const me = req.user.id;
+    const isOwner = req.user.role === 'owner';
     const data = await req.q(async c => {
       const q = (t, p) => c.query(t, p).then(x => x.rows);
-      // Sequential, not Promise.all: these share one client because they share
-      // one RLS transaction, and a pg client runs a single query at a time.
+      const one = async (t, p) => (await c.query(t, p)).rows[0];
+
+      // "Needs your attention" — the counts, each one clickable in the UI.
+      const attention = await one(`
+        SELECT
+          (SELECT count(*) FROM tasks t WHERE t.parent_task_id IS NOT NULL
+                                          AND t.status NOT IN ('approved','completed'))::int AS client_requests,
+          (SELECT count(*) FROM tasks t WHERE t.status NOT IN ('approved','completed')
+                                          AND t.due_date < CURRENT_DATE)::int               AS overdue_tasks,
+          (SELECT count(*) FROM tasks t WHERE t.status='in_review')::int                     AS awaiting_approval,
+          (SELECT count(*) FROM tasks t WHERE t.status='awaiting_client')::int               AS waiting_on_client,
+          (SELECT count(*) FROM tasks t WHERE t.status NOT IN ('approved','completed')
+                                          AND t.due_date = CURRENT_DATE + 1)::int            AS due_tomorrow,
+          ${isOwner ? `(SELECT count(*) FROM transactions x
+                         WHERE x.direction='in' AND NOT x.settled AND x.due_on < CURRENT_DATE)::int`
+                    : '0'}                                                                   AS overdue_invoices,
+          (SELECT count(*) FROM scope_alerts s WHERE s.resolution='pending')::int            AS scope_pending`);
+
+      const scope = await q(`SELECT s.id, s.task_id, s.revision_round, s.revisions_included, s.created_at,
+                  t.title AS task, p.name AS project, p.id AS project_id, co.name AS company
+             FROM scope_alerts s JOIN tasks t ON t.id=s.task_id
+             JOIN projects p ON p.id=s.project_id JOIN companies co ON co.id=p.company_id
+            WHERE s.resolution='pending' ORDER BY s.created_at DESC`);
+
+      // Client activity, split the way the spec asks: what is still on us,
+      // versus what we have already dealt with.
+      const waitingOnYou = await q(`
+        SELECT a.id, a.decision, a.note, a.decided_by_name, a.decided_at, a.task_id,
+               t.title AS task, co.name AS company, t.status
+          FROM approvals a JOIN tasks t ON t.id=a.task_id
+          JOIN projects p ON p.id=t.project_id JOIN companies co ON co.id=p.company_id
+         WHERE a.decision='changes_requested'
+           AND EXISTS (SELECT 1 FROM tasks rt WHERE rt.parent_task_id=t.id
+                         AND rt.status NOT IN ('approved','completed'))
+         ORDER BY a.decided_at DESC LIMIT 12`);
+      const handled = await q(`
+        SELECT a.id, a.decision, a.note, a.decided_by_name, a.decided_at, a.task_id,
+               t.title AS task, co.name AS company
+          FROM approvals a JOIN tasks t ON t.id=a.task_id
+          JOIN projects p ON p.id=t.project_id JOIN companies co ON co.id=p.company_id
+         WHERE a.decision='approved'
+            OR NOT EXISTS (SELECT 1 FROM tasks rt WHERE rt.parent_task_id=t.id
+                             AND rt.status NOT IN ('approved','completed'))
+         ORDER BY a.decided_at DESC LIMIT 8`);
+
       // Sitting with the client — the "where is it?" answer, pre-computed.
       const waiting = await q(`SELECT t.id, t.title, t.client_due_date, t.revision_round, p.name AS project, co.name AS company,
                   (SELECT MAX(version_no) FROM task_versions v WHERE v.task_id=t.id) AS version,
                   (SELECT MAX(sent_at)    FROM task_versions v WHERE v.task_id=t.id) AS sent_at
              FROM tasks t JOIN projects p ON p.id=t.project_id JOIN companies co ON co.id=p.company_id
             WHERE t.status='awaiting_client' ORDER BY sent_at NULLS LAST`);
-      // Money left on the table, still undecided.
-      const scope = await q(`SELECT s.id, s.revision_round, s.revisions_included, s.created_at,
-                  t.title AS task, p.name AS project, p.id AS project_id, co.name AS company
-             FROM scope_alerts s JOIN tasks t ON t.id=s.task_id
-             JOIN projects p ON p.id=s.project_id JOIN companies co ON co.id=p.company_id
-            WHERE s.resolution='pending' ORDER BY s.created_at DESC`);
-      // Late, or late by the end of the week, against the *internal* date.
-      const atRisk = await q(`SELECT t.id, t.title, t.due_date, t.assignee_id, t.status, p.name AS project, co.name AS company
-             FROM tasks t JOIN projects p ON p.id=t.project_id JOIN companies co ON co.id=p.company_id
-            WHERE t.status NOT IN ('approved','completed') AND t.due_date IS NOT NULL
-              AND t.due_date <= CURRENT_DATE + 2
-            ORDER BY t.due_date`);
+
+      // Today, tomorrow and anything already late — one list, ordered.
+      const todayTomorrow = await q(`
+        SELECT t.id, t.title, t.status, t.due_date, t.assignee_id, t.difficulty,
+               p.name AS project, co.name AS company,
+               CASE WHEN t.due_date < CURRENT_DATE THEN 'overdue'
+                    WHEN t.due_date = CURRENT_DATE THEN 'today'
+                    ELSE 'tomorrow' END AS bucket
+          FROM tasks t JOIN projects p ON p.id=t.project_id JOIN companies co ON co.id=p.company_id
+         WHERE t.status NOT IN ('approved','completed')
+           AND t.due_date IS NOT NULL AND t.due_date <= CURRENT_DATE + 1
+           ${isOwner ? '' : 'AND t.assignee_id = $1'}
+         ORDER BY t.due_date`, isOwner ? [] : [me]);
+
       const mine = await q(`SELECT t.id, t.title, t.status, t.due_date, t.client_due_date, t.revision_round,
-                  p.name AS project, p.id AS project_id
+                  t.difficulty, p.name AS project, p.id AS project_id
              FROM tasks t JOIN projects p ON p.id=t.project_id
             WHERE t.assignee_id=$1 AND t.status NOT IN ('approved','completed')
             ORDER BY t.due_date NULLS LAST, t.position`, [me]);
+
+      // Project cards for the grid at the bottom of the page.
+      const projects = await q(`
+        SELECT p.id, p.name, p.stage, p.client_due_date, p.due_date, co.name AS company_name,
+               pr.pct, pr.done, pr.total,
+               ARRAY(SELECT m.user_id FROM project_members m WHERE m.project_id=p.id) AS member_ids
+          FROM projects p JOIN companies co ON co.id=p.company_id
+          CROSS JOIN LATERAL project_progress(p.id) pr
+         WHERE NOT p.archived ORDER BY p.due_date NULLS LAST LIMIT 12`);
+
+      // The sparkline strip: shipped versus slipped, six weeks.
+      const strip = await q(`
+        SELECT to_char(w.week, 'MM-DD') AS week,
+               (SELECT count(*) FROM tasks t
+                 WHERE t.completed_at >= w.week AND t.completed_at < w.week + interval '7 days'
+                   ${isOwner ? '' : 'AND t.assignee_id = $1'})::int AS shipped,
+               (SELECT count(*) FROM tasks t
+                 WHERE t.due_date >= w.week::date AND t.due_date < (w.week + interval '7 days')::date
+                   AND (t.completed_at IS NULL OR t.completed_at::date > t.due_date)
+                   ${isOwner ? '' : 'AND t.assignee_id = $1'})::int AS slipped
+          FROM generate_series(date_trunc('week', CURRENT_DATE) - interval '5 weeks',
+                               date_trunc('week', CURRENT_DATE), interval '1 week') AS w(week)
+         ORDER BY w.week`, isOwner ? [] : [me]);
+
+      const stats = await one(`
+        SELECT (SELECT count(*) FROM tasks WHERE assignee_id=$1 AND status NOT IN ('approved','completed'))::int AS open,
+               (SELECT count(*) FROM tasks WHERE assignee_id=$1 AND status NOT IN ('approved','completed')
+                  AND due_date <= CURRENT_DATE + 7)::int AS due_this_week,
+               (SELECT count(*) FROM tasks WHERE assignee_id=$1 AND status IN ('approved','completed')
+                  AND completed_at >= now() - interval '7 days')::int AS done_7d,
+               (SELECT count(*) FROM project_members WHERE user_id=$1)::int AS projects`, [me]);
+
       const recent = await q(`SELECT a.verb, a.detail, a.actor_name, a.actor_id, a.created_at, p.name AS project
              FROM activity a LEFT JOIN projects p ON p.id=a.project_id
             ORDER BY a.created_at DESC LIMIT 12`);
       const unread = await q(`SELECT id, title, body, kind, link, params, created_at FROM notifications
             WHERE NOT read ORDER BY created_at DESC LIMIT 20`);
-      return { waiting, scope, atRisk, mine, recent, unread };
+
+      return { attention, scope, client_activity: { waiting_on_you: waitingOnYou, handled },
+               waiting, today_tomorrow: todayTomorrow, mine, projects, strip, stats, recent, unread };
     });
+
     const names = await nameMap(req);
-    for (const t of data.atRisk) t.assignee = names.get(t.assignee_id) || null;
-    for (const a of data.recent) a.actor_name = a.actor_name || names.get(a.actor_id) || '';
+    const label = id => names.get(id) || null;
+    for (const t of data.today_tomorrow) t.assignee = label(t.assignee_id);
+    for (const a of data.recent) a.actor_name = a.actor_name || label(a.actor_id) || '';
+    for (const p of data.projects) p.members = (p.member_ids || []).map(label).filter(Boolean);
     res.json(data);
+  }));
+
+  // ---- my tasks (§4) -------------------------------------------------------
+  r.get('/my-tasks', only('owner', 'teammate', 'editor'), wrap(async (req, res) => {
+    res.json(await req.sql(`
+      SELECT t.id, t.title, t.description, t.status, t.due_date, t.client_due_date,
+             t.difficulty, t.revision_round, t.requires_file, t.visibility,
+             p.name AS project_name, p.id AS project_id, co.name AS company_name,
+             (SELECT count(*) FROM files f WHERE f.task_id=t.id)::int AS file_count
+        FROM tasks t JOIN projects p ON p.id=t.project_id JOIN companies co ON co.id=p.company_id
+       WHERE t.assignee_id=$1 ${req.query.all === '1' ? '' : "AND t.status NOT IN ('approved','completed')"}
+       ORDER BY t.status='approved', t.due_date NULLS LAST, t.id`, [req.user.id]));
   }));
 
   // ---- projects -----------------------------------------------------------
@@ -186,31 +282,47 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyUser }) => {
     res.json(out);
   }));
 
-  r.post('/tasks', only('owner', 'teammate'), wrap(async (req, res) => {
+  r.post('/tasks', only('owner', 'teammate', 'editor'), wrap(async (req, res) => {
     const b = req.body || {};
     if (!b.project_id || !b.title) return res.status(400).json({ error: 'Project and title are required' });
     // A teammate may only create internal tasks; the RLS policy enforces this
     // too, but failing here gives a readable message instead of a policy error.
-    const visibility = req.user.role === 'teammate' ? 'internal' : (b.visibility || 'internal');
+    const visibility = req.user.role === 'owner' ? (b.visibility || 'internal') : 'internal';
+    // A member may only put work on themselves; assigning to someone else is
+    // what separates an editor from a member (§8). Naming somebody else does
+    // not silently produce an unassigned task — it lands on the member.
+    const assignee = req.user.role === 'teammate'
+      ? req.user.id
+      : (b.assignee_id || null);
     const rows = await req.sql(
       `INSERT INTO tasks(project_id,title,description,status,visibility,assignee_id,due_date,
-                         client_due_date,is_deliverable,position,created_by)
+                         client_due_date,is_deliverable,difficulty,requires_file,position,created_by)
        VALUES($1,$2,$3,COALESCE($4,'todo'),$5,$6,$7,$8,COALESCE($9,true),
-              COALESCE((SELECT MAX(position)+1 FROM tasks WHERE project_id=$1),0),$10)
+              COALESCE($10,'medium'),COALESCE($11,false),
+              COALESCE((SELECT MAX(position)+1 FROM tasks WHERE project_id=$1),0),$12)
        RETURNING *`,
       [b.project_id, b.title, b.description || '', b.status, visibility,
-       b.assignee_id || null, b.due_date || null, b.client_due_date || null,
-       b.is_deliverable, req.user.id]);
+       assignee, b.due_date || null, b.client_due_date || null,
+       b.is_deliverable, b.difficulty, b.requires_file, req.user.id]);
     res.json(rows[0]);
   }));
 
   r.patch('/tasks/:id', wrap(async (req, res) => {
     const allowed = ['title', 'description', 'status', 'visibility', 'assignee_id',
-                     'due_date', 'client_due_date', 'is_deliverable', 'position'];
+                     'due_date', 'client_due_date', 'is_deliverable', 'position',
+                     'difficulty', 'requires_file', 'missed'];
     const sets = [], vals = [];
     for (const k of allowed) if (k in req.body) { sets.push(`${k}=$${sets.length + 1}`); vals.push(req.body[k]); }
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
-    vals.push(Number(req.params.id));
+    const id = Number(req.params.id);
+    if (['approved', 'completed'].includes(req.body.status)) {
+      const [t] = await req.sql(
+        `SELECT requires_file, (SELECT count(*) FROM files f WHERE f.task_id=t.id) AS files
+           FROM tasks t WHERE t.id=$1`, [id]);
+      if (t && t.requires_file && Number(t.files) === 0)
+        return res.status(400).json({ error: 'This task needs a file attached before it can be closed' });
+    }
+    vals.push(id);
     try {
       const rows = await req.sql(`UPDATE tasks SET ${sets.join(',')} WHERE id=$${vals.length} RETURNING *`, vals);
       if (!rows.length) return res.status(404).json({ error: 'Not found, or not yours to change' });
@@ -218,17 +330,18 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyUser }) => {
     } catch (e) {
       // The field guard raises a plain-language reason; pass it through rather
       // than turning a deliberate rule into a 500.
-      if (/account manager|Revision rounds|cannot be moved/.test(e.message))
+      if (/account manager|Revision rounds|cannot be moved|editor|Difficulty/.test(e.message))
         return res.status(403).json({ error: e.message });
       throw e;
     }
   }));
 
-  r.post('/tasks/:id/comments', only('owner', 'teammate'), wrap(async (req, res) => {
+  r.post('/tasks/:id/comments', only('owner', 'teammate', 'editor'), wrap(async (req, res) => {
     const body = (req.body.body || '').trim();
     if (!body) return res.status(400).json({ error: 'Empty comment' });
-    const visibility = req.user.role === 'teammate' ? (req.body.visibility === 'client_visible' ? 'client_visible' : 'internal')
-                                                   : (req.body.visibility || 'internal');
+    const visibility = req.user.role === 'owner'
+      ? (req.body.visibility || 'internal')
+      : (req.body.visibility === 'client_visible' ? 'client_visible' : 'internal');
     const rows = await req.sql(
       `INSERT INTO comments(task_id,author_id,author_kind,body,visibility) VALUES($1,$2,'staff',$3,$4) RETURNING *`,
       [Number(req.params.id), req.user.id, body, visibility]);
@@ -238,7 +351,7 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyUser }) => {
   // ---- send for approval --------------------------------------------------
   // Opening a version is the single act that makes a deliverable client-visible
   // and puts the ball in their court; the trigger does both halves atomically.
-  r.post('/tasks/:id/send-for-approval', only('owner', 'teammate'), wrap(async (req, res) => {
+  r.post('/tasks/:id/send-for-approval', only('owner', 'teammate', 'editor'), wrap(async (req, res) => {
     const id = Number(req.params.id);
     const out = await req.q(async c => {
       const cur = await c.query(`SELECT COALESCE(MAX(version_no),0)+1 AS next FROM task_versions WHERE task_id=$1`, [id]);
@@ -285,8 +398,10 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyUser }) => {
       if (!upd.rows.length) return null;
       const s = upd.rows[0];
       const info = await c.query(
-        `SELECT t.title, p.company_id, p.name AS project FROM scope_alerts s
-           JOIN tasks t ON t.id=s.task_id JOIN projects p ON p.id=s.project_id WHERE s.id=$1`, [id]);
+        `SELECT t.title, p.company_id, p.name AS project, co.name AS company_name
+           FROM scope_alerts s JOIN tasks t ON t.id=s.task_id
+           JOIN projects p ON p.id=s.project_id JOIN companies co ON co.id=p.company_id
+          WHERE s.id=$1`, [id]);
       await c.query(
         `INSERT INTO activity(project_id,task_id,actor_id,verb,detail,visibility)
          VALUES($1,$2,$3,$4,$5,'internal')`,
@@ -295,22 +410,17 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyUser }) => {
          `round ${s.revision_round}`]);
 
       if (resolution === 'billed') {
-        // Park it on the client's open draft invoice, creating one if needed,
-        // so the accountant finds it waiting rather than being told about it.
-        const co = info.rows[0].company_id;
-        let inv = (await c.query(
-          `SELECT * FROM invoices WHERE company_id=$1 AND status='draft' ORDER BY id DESC LIMIT 1`, [co])).rows[0];
-        if (!inv) {
-          inv = (await c.query(
-            `INSERT INTO invoices(company_id,project_id,number,status,note)
-             VALUES($1,$2,$3,'draft','Extra scope') RETURNING *`,
-            [co, s.project_id, `INV-${Date.now().toString().slice(-8)}`])).rows[0];
-        }
-        await c.query(
-          `INSERT INTO invoice_lines(invoice_id,description,qty,unit_amount,scope_alert_id)
-           VALUES($1,$2,1,$3,$4)`,
-          [inv.id, `Extra scope — revision round ${s.revision_round} on "${info.rows[0].title}"`, Number(amount), s.id]);
-        return { alert: s, invoice_id: inv.id };
+        // Posts as money owed to us but not yet moved: it lifts profit for the
+        // month and leaves cash alone, and shows up in the accountant's
+        // "unpaid to us" without anyone having to be told about it.
+        const tx = (await c.query(
+          `INSERT INTO transactions(direction,counterparty,description,category,amount,settled,
+                                    due_on,company_id,project_id,scope_alert_id,created_by)
+           VALUES('in',$1,$2,'project_fee',$3,false,CURRENT_DATE + 14,$4,$5,$6,$7) RETURNING id`,
+          [info.rows[0].company_name || '',
+           `Extra scope — revision round ${s.revision_round} on "${info.rows[0].title}"`,
+           Number(amount), info.rows[0].company_id, s.project_id, s.id, req.user.id])).rows[0];
+        return { alert: s, transaction_id: tx.id };
       }
       return { alert: s };
     });

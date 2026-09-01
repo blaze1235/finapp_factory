@@ -52,12 +52,29 @@ CREATE TABLE IF NOT EXISTS users (
   -- invite time and carried into every RLS session as app.company_id.
   company_id INTEGER,
   craft TEXT DEFAULT '',
+  -- Team profile (§8). These live here rather than in a tenant database
+  -- because they belong to the login, and the team page is read before any
+  -- tenant database is opened.
+  title TEXT DEFAULT '',
+  responsibility TEXT DEFAULT '',
+  email TEXT DEFAULT '',
+  work_mode TEXT NOT NULL DEFAULT 'office',   -- office | remote | hybrid
+  birthdate DATE,
+  -- A fixed colour per person, so the same initials are the same colour on
+  -- every card, row and avatar stack in the product.
+  avatar_color TEXT DEFAULT '',
   telegram_chat_id BIGINT UNIQUE,
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (role <> 'client' OR company_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS users_tenant_idx ON users(tenant_id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS responsibility TEXT DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS work_mode TEXT NOT NULL DEFAULT 'office';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS birthdate DATE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_color TEXT DEFAULT '';
 
 -- A Telegram chat has to resolve to a tenant before we know which database to
 -- open, so this mapping cannot live in a tenant database.
@@ -82,6 +99,23 @@ CREATE TABLE IF NOT EXISTS pending_actions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Adding a client mints a join link rather than the owner inventing a PIN for
+-- someone else and sending it over Telegram. The invitee sets their own.
+CREATE TABLE IF NOT EXISTS invites (
+  token TEXT PRIMARY KEY,
+  tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  role TEXT NOT NULL REFERENCES roles(key),
+  company_id INTEGER,          -- clients only: companies.id in the tenant database
+  name TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  craft TEXT DEFAULT '',
+  created_by INTEGER,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS link_codes (
   code TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -94,11 +128,15 @@ CREATE TABLE IF NOT EXISTS link_codes (
 // considered and dropped: at 6–8 people every cell resolves the same way, and
 // an unused matrix is just a way to get a cell wrong. Revisit only when a real
 // combination cannot be expressed here.
+// Five permission levels (§8). Editor and Member share a data scope — the
+// difference is that an editor may assign work to other people, which the
+// task field guard in schema.sql enforces.
 const ROLES = [
-  ['owner',      'Account manager', '*',                                  'desktop', 10],
-  ['accountant', 'Accountant',      'finance,clients,reports',            'desktop', 20],
-  ['teammate',   'Teammate',        'projects,tasks,files,my_week',       'desktop', 30],
-  ['client',     'Client',          'portal',                             'portal',  40],
+  ['owner',      'Account manager', '*',                                            'desktop', 10],
+  ['accountant', 'Accountant',      'finance,clients,projects',                     'desktop', 20],
+  ['editor',     'Editor',          'projects,tasks,files,my_week,calendar,assign', 'desktop', 30],
+  ['teammate',   'Member',          'projects,tasks,files,my_week,calendar',        'desktop', 40],
+  ['client',     'Client',          'portal',                                       'portal',  50],
 ];
 
 async function initControlDb() {

@@ -45,7 +45,7 @@ CREATE OR REPLACE FUNCTION app_company_id() RETURNS INTEGER
   LANGUAGE sql STABLE AS $$ SELECT NULLIF(current_setting('app.company_id', true), '')::integer $$;
 
 CREATE OR REPLACE FUNCTION app_is_staff() RETURNS BOOLEAN
-  LANGUAGE sql STABLE AS $$ SELECT app_role() IN ('owner', 'accountant', 'teammate') $$;
+  LANGUAGE sql STABLE AS $$ SELECT app_role() IN ('owner', 'accountant', 'teammate', 'editor') $$;
 
 -- ---------- clients (the agency's customers) ---------------------------------
 CREATE TABLE IF NOT EXISTS companies (
@@ -317,13 +317,19 @@ $$;
 CREATE OR REPLACE FUNCTION trg_task_field_guard() RETURNS TRIGGER
   LANGUAGE plpgsql AS $$
 BEGIN
-  IF app_role() = 'teammate' THEN
+  -- Neither an editor nor a member decides what a client sees or when.
+  IF app_role() IN ('teammate','editor') THEN
     IF NEW.visibility          IS DISTINCT FROM OLD.visibility          THEN RAISE EXCEPTION 'Only the account manager can change who sees this task'; END IF;
     IF NEW.client_visible_from IS DISTINCT FROM OLD.client_visible_from THEN RAISE EXCEPTION 'Only the account manager can change client visibility'; END IF;
-    IF NEW.assignee_id         IS DISTINCT FROM OLD.assignee_id         THEN RAISE EXCEPTION 'Only the account manager can reassign a task'; END IF;
     IF NEW.client_due_date     IS DISTINCT FROM OLD.client_due_date     THEN RAISE EXCEPTION 'Only the account manager can change the client deadline'; END IF;
     IF NEW.revision_round      IS DISTINCT FROM OLD.revision_round      THEN RAISE EXCEPTION 'Revision rounds are counted automatically'; END IF;
     IF NEW.project_id          IS DISTINCT FROM OLD.project_id          THEN RAISE EXCEPTION 'A task cannot be moved between projects'; END IF;
+    IF NEW.missed              IS DISTINCT FROM OLD.missed              THEN RAISE EXCEPTION 'Only the account manager can write a task off as missed'; END IF;
+    IF NEW.difficulty          IS DISTINCT FROM OLD.difficulty          THEN RAISE EXCEPTION 'Difficulty is set when the task is created — it decides the points'; END IF;
+  END IF;
+  -- The one thing that separates the two levels: an editor assigns work.
+  IF app_role() = 'teammate' AND NEW.assignee_id IS DISTINCT FROM OLD.assignee_id THEN
+    RAISE EXCEPTION 'Only an editor or the account manager can reassign a task';
   END IF;
   RETURN NEW;
 END $$;
@@ -512,7 +518,7 @@ CREATE POLICY companies_office ON companies FOR ALL TO am_app
   USING (app_role() IN ('owner','accountant')) WITH CHECK (app_role() IN ('owner','accountant'));
 DROP POLICY IF EXISTS companies_teammate ON companies;
 CREATE POLICY companies_teammate ON companies FOR SELECT TO am_app
-  USING (app_role() = 'teammate' AND id IN (SELECT app_my_companies()));
+  USING (app_role() IN ('teammate','editor') AND id IN (SELECT app_my_companies()));
 DROP POLICY IF EXISTS companies_client ON companies;
 CREATE POLICY companies_client ON companies FOR SELECT TO am_app
   USING (app_role() = 'client' AND id = app_company_id());
@@ -528,7 +534,7 @@ CREATE POLICY projects_accountant ON projects FOR SELECT TO am_app
   USING (app_role() = 'accountant');
 DROP POLICY IF EXISTS projects_teammate ON projects;
 CREATE POLICY projects_teammate ON projects FOR SELECT TO am_app
-  USING (app_role() = 'teammate' AND id IN (SELECT app_my_projects()));
+  USING (app_role() IN ('teammate','editor') AND id IN (SELECT app_my_projects()));
 -- Written inline rather than via app_client_projects() so this policy never
 -- reads its own table through a helper.
 DROP POLICY IF EXISTS projects_client ON projects;
@@ -544,7 +550,7 @@ CREATE POLICY members_owner ON project_members FOR ALL TO am_app
   USING (app_role() = 'owner') WITH CHECK (app_role() = 'owner');
 DROP POLICY IF EXISTS members_teammate ON project_members;
 CREATE POLICY members_teammate ON project_members FOR SELECT TO am_app
-  USING (app_role() = 'teammate' AND project_id IN (SELECT app_my_projects()));
+  USING (app_role() IN ('teammate','editor') AND project_id IN (SELECT app_my_projects()));
 -- Assignee names are shown to clients — the client asked for it, and the
 -- trade-off is understood. Only the membership list, never contact details.
 DROP POLICY IF EXISTS members_client ON project_members;
@@ -560,14 +566,14 @@ CREATE POLICY tasks_owner ON tasks FOR ALL TO am_app
   USING (app_role() = 'owner') WITH CHECK (app_role() = 'owner');
 DROP POLICY IF EXISTS tasks_teammate_read ON tasks;
 CREATE POLICY tasks_teammate_read ON tasks FOR SELECT TO am_app
-  USING (app_role() = 'teammate' AND project_id IN (SELECT app_my_projects()));
+  USING (app_role() IN ('teammate','editor') AND project_id IN (SELECT app_my_projects()));
 DROP POLICY IF EXISTS tasks_teammate_write ON tasks;
 CREATE POLICY tasks_teammate_write ON tasks FOR UPDATE TO am_app
-  USING (app_role() = 'teammate' AND project_id IN (SELECT app_my_projects()))
-  WITH CHECK (app_role() = 'teammate' AND project_id IN (SELECT app_my_projects()));
+  USING (app_role() IN ('teammate','editor') AND project_id IN (SELECT app_my_projects()))
+  WITH CHECK (app_role() IN ('teammate','editor') AND project_id IN (SELECT app_my_projects()));
 DROP POLICY IF EXISTS tasks_teammate_add ON tasks;
 CREATE POLICY tasks_teammate_add ON tasks FOR INSERT TO am_app
-  WITH CHECK (app_role() = 'teammate' AND project_id IN (SELECT app_my_projects())
+  WITH CHECK (app_role() IN ('teammate','editor') AND project_id IN (SELECT app_my_projects())
               AND visibility = 'internal');
 DROP POLICY IF EXISTS tasks_client ON tasks;
 CREATE POLICY tasks_client ON tasks FOR SELECT TO am_app
@@ -596,11 +602,11 @@ CREATE POLICY comments_owner ON comments FOR ALL TO am_app
   USING (app_role() = 'owner') WITH CHECK (app_role() = 'owner');
 DROP POLICY IF EXISTS comments_teammate ON comments;
 CREATE POLICY comments_teammate ON comments FOR SELECT TO am_app
-  USING (app_role() = 'teammate'
+  USING (app_role() IN ('teammate','editor')
          AND (task_id IN (SELECT id FROM tasks) OR project_id IN (SELECT app_my_projects())));
 DROP POLICY IF EXISTS comments_teammate_add ON comments;
 CREATE POLICY comments_teammate_add ON comments FOR INSERT TO am_app
-  WITH CHECK (app_role() = 'teammate' AND author_id = app_user_id()
+  WITH CHECK (app_role() IN ('teammate','editor') AND author_id = app_user_id()
               AND (task_id IN (SELECT id FROM tasks) OR project_id IN (SELECT app_my_projects())));
 -- The cutoff: a comment written while the task was internal stays internal
 -- forever, even after the task is opened up. (Open question 4.)
@@ -619,9 +625,9 @@ CREATE POLICY files_owner ON files FOR ALL TO am_app
   USING (app_role() = 'owner') WITH CHECK (app_role() = 'owner');
 DROP POLICY IF EXISTS files_teammate ON files;
 CREATE POLICY files_teammate ON files FOR ALL TO am_app
-  USING (app_role() = 'teammate'
+  USING (app_role() IN ('teammate','editor')
          AND (task_id IN (SELECT id FROM tasks) OR project_id IN (SELECT app_my_projects())))
-  WITH CHECK (app_role() = 'teammate'
+  WITH CHECK (app_role() IN ('teammate','editor')
          AND (task_id IN (SELECT id FROM tasks) OR project_id IN (SELECT app_my_projects())));
 DROP POLICY IF EXISTS files_client ON files;
 CREATE POLICY files_client ON files FOR SELECT TO am_app
@@ -636,7 +642,7 @@ CREATE POLICY approvals_owner ON approvals FOR ALL TO am_app
   USING (app_role() = 'owner') WITH CHECK (app_role() = 'owner');
 DROP POLICY IF EXISTS approvals_teammate ON approvals;
 CREATE POLICY approvals_teammate ON approvals FOR SELECT TO am_app
-  USING (app_role() = 'teammate' AND task_id IN (SELECT id FROM tasks));
+  USING (app_role() IN ('teammate','editor') AND task_id IN (SELECT id FROM tasks));
 DROP POLICY IF EXISTS approvals_client_read ON approvals;
 CREATE POLICY approvals_client_read ON approvals FOR SELECT TO am_app
   USING (app_role() = 'client' AND task_id IN (SELECT id FROM tasks));
@@ -687,10 +693,10 @@ CREATE POLICY activity_owner ON activity FOR ALL TO am_app
   USING (app_role() = 'owner') WITH CHECK (app_role() = 'owner');
 DROP POLICY IF EXISTS activity_teammate ON activity;
 CREATE POLICY activity_teammate ON activity FOR SELECT TO am_app
-  USING (app_role() = 'teammate' AND project_id IN (SELECT app_my_projects()));
+  USING (app_role() IN ('teammate','editor') AND project_id IN (SELECT app_my_projects()));
 DROP POLICY IF EXISTS activity_teammate_add ON activity;
 CREATE POLICY activity_teammate_add ON activity FOR INSERT TO am_app
-  WITH CHECK (app_role() = 'teammate' AND project_id IN (SELECT app_my_projects()));
+  WITH CHECK (app_role() IN ('teammate','editor') AND project_id IN (SELECT app_my_projects()));
 DROP POLICY IF EXISTS activity_client ON activity;
 CREATE POLICY activity_client ON activity FOR SELECT TO am_app
   USING (app_role() = 'client' AND visibility = 'client_visible'
@@ -733,30 +739,8 @@ CREATE POLICY alerts_staff ON alerts_fired FOR ALL TO am_app
 -- here. security_invoker=true is what makes them safe: without it a view runs
 -- as its owner (a superuser) and would bypass every policy above.
 -- =============================================================================
-CREATE OR REPLACE VIEW v_client_projects WITH (security_invoker = true) AS
-  SELECT p.id, p.company_id, p.name, p.description, p.stage,
-         p.client_due_date AS due,          -- never p.due_date
-         pr.pct AS progress_pct, pr.done AS delivered, pr.total AS deliverables
-    FROM projects p
-    CROSS JOIN LATERAL project_progress(p.id, true) pr;
-
-CREATE OR REPLACE VIEW v_client_tasks WITH (security_invoker = true) AS
-  SELECT t.id, t.project_id, t.title, t.description,
-         CASE t.status
-           WHEN 'todo'            THEN 'coming_up'
-           WHEN 'in_progress'     THEN 'in_progress'
-           WHEN 'in_review'       THEN 'in_progress'   -- internal business
-           WHEN 'awaiting_client' THEN 'needs_you'
-           ELSE 'done'
-         END AS bucket,
-         (t.status = 'awaiting_client') AS needs_you,
-         t.client_due_date AS due,          -- never t.due_date
-         t.assignee_id,                     -- resolved to a name by the app
-         t.revision_round,
-         (SELECT MAX(version_no) FROM task_versions v WHERE v.task_id = t.id) AS version,
-         t.created_at
-    FROM tasks t;
-
+-- v_client_projects and v_client_tasks are defined in the v2 section below,
+-- which is where the client's revised visibility rules live.
 CREATE OR REPLACE VIEW v_client_comments WITH (security_invoker = true) AS
   SELECT c.id, c.task_id, c.body, c.author_kind, c.created_at
     FROM comments c;
@@ -769,8 +753,9 @@ CREATE OR REPLACE VIEW v_client_approvals WITH (security_invoker = true) AS
   SELECT a.id, a.task_id, a.version_no, a.decision, a.decided_by_name, a.note, a.decided_at
     FROM approvals a;
 
-GRANT SELECT ON v_client_projects, v_client_tasks, v_client_comments,
-                v_client_files, v_client_approvals TO am_app;
+-- The views defined here; the two that moved to the v2 section are granted
+-- there, after they exist.
+GRANT SELECT ON v_client_comments, v_client_files, v_client_approvals TO am_app;
 
 -- ---------- privileges -------------------------------------------------------
 -- am_app can touch every table, and RLS decides which rows. Without the GRANTs
@@ -783,3 +768,369 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO am_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO am_app;
+
+
+-- #############################################################################
+-- v2 — the client's revised specification
+--
+-- Everything below is additive and idempotent, so it migrates a live agency
+-- database on deploy without a separate migration step.
+--
+-- Three changes here deliberately REVERSE decisions recorded above, at the
+-- client's written request. They are marked REVERSAL so nobody later "fixes"
+-- them back:
+--   * clients no longer see who is doing the work
+--   * per-person performance is now tracked and ranked
+--   * six named pipeline stages instead of five
+-- #############################################################################
+
+-- ---------- projects: six named stages ---------------------------------------
+-- REVERSAL: the earlier five stages become the six the client named.
+ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_stage_check;
+UPDATE projects SET stage = 'delivery' WHERE stage IN ('delivered', 'archived');
+ALTER TABLE projects ADD CONSTRAINT projects_stage_check
+  CHECK (stage IN ('brief','concept','production','review','approval','delivery'));
+
+-- ---------- tasks: difficulty, points, and the file requirement --------------
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS difficulty TEXT NOT NULL DEFAULT 'medium';
+ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_difficulty_check;
+ALTER TABLE tasks ADD CONSTRAINT tasks_difficulty_check
+  CHECK (difficulty IN ('easy','medium','hard'));
+-- "Requires a file upload?" — when true the task cannot be closed until
+-- something is actually attached, so "done" and "delivered" stay the same word.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS requires_file BOOLEAN NOT NULL DEFAULT false;
+-- Missed is a decision someone makes, not a date passing: a task is only
+-- penalised once the owner says it was abandoned.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS missed BOOLEAN NOT NULL DEFAULT false;
+
+-- ---------- companies: industry, since-date, active/past ---------------------
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS industry TEXT DEFAULT '';
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS since_date DATE;
+ALTER TABLE companies DROP CONSTRAINT IF EXISTS companies_status_check;
+UPDATE companies SET status = 'past' WHERE status IN ('former','paused');
+ALTER TABLE companies ADD CONSTRAINT companies_status_check
+  CHECK (status IN ('active','past'));
+
+-- A client is an organisation, not a person: several people there may need to
+-- be reachable, and one of them is the main contact.
+CREATE TABLE IF NOT EXISTS client_contacts (
+  id SERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  position TEXT DEFAULT '',
+  email TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  is_main BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS client_contacts_company_idx ON client_contacts(company_id);
+
+-- ---------- timeline phases --------------------------------------------------
+-- The single-project timeline is phases, not stages: a project sits in one
+-- stage at a time, but its phases overlap and are drawn side by side.
+CREATE TABLE IF NOT EXISTS project_phases (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  starts_on DATE,
+  ends_on DATE,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (ends_on IS NULL OR starts_on IS NULL OR ends_on >= starts_on)
+);
+CREATE INDEX IF NOT EXISTS project_phases_project_idx ON project_phases(project_id);
+
+-- ---------- documents --------------------------------------------------------
+-- Contracts (shartnoma) hang off the client, not a task, so files gains a
+-- company scope and a 'document' kind for the client's Documents page.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS files_company_idx ON files(company_id);
+
+-- ---------- money: one ledger --------------------------------------------------
+-- §9 describes accounts and a transactions ledger and never mentions invoice
+-- line items, so invoices/payments collapse into this. An income row with
+-- settled = false IS "unpaid to us": it moves profit and leaves cash alone,
+-- which is exactly the profit-vs-cash split the spec asks to be shown.
+CREATE TABLE IF NOT EXISTS accounts (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  purpose TEXT DEFAULT '',
+  currency TEXT NOT NULL DEFAULT 'UZS',
+  opening_balance BIGINT NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT true,
+  position INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id SERIAL PRIMARY KEY,
+  direction TEXT NOT NULL CHECK (direction IN ('in','out')),
+  counterparty TEXT NOT NULL DEFAULT '',
+  description TEXT DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'other',
+  account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+  -- `period` is the month the money belongs to; `paid_on` is when it moved.
+  -- Payroll earned in August and paid on the 30th is an August cost either way,
+  -- but only lands in cash once settled — that gap is the whole point.
+  period DATE NOT NULL DEFAULT date_trunc('month', CURRENT_DATE)::date,
+  paid_on DATE,
+  amount BIGINT NOT NULL CHECK (amount > 0),
+  settled BOOLEAN NOT NULL DEFAULT true,
+  due_on DATE,
+  company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+  project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  scope_alert_id INTEGER REFERENCES scope_alerts(id) ON DELETE SET NULL,
+  created_by INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS transactions_period_idx ON transactions(period);
+CREATE INDEX IF NOT EXISTS transactions_company_idx ON transactions(company_id);
+
+-- Status is derived, never stored, so it cannot go stale.
+CREATE OR REPLACE FUNCTION transaction_status(settled BOOLEAN, direction TEXT, due_on DATE)
+  RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE
+      WHEN settled AND direction = 'in'  THEN 'received'
+      WHEN settled AND direction = 'out' THEN 'paid'
+      WHEN due_on IS NOT NULL AND due_on < CURRENT_DATE THEN 'overdue'
+      ELSE 'not_settled' END
+$$;
+
+-- Retire the invoice model into the ledger. Written as a migration rather than
+-- a DROP because a live agency may already have real money in these tables:
+-- each invoice becomes one income row, settled if it was paid.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+              WHERE table_schema='public' AND table_name='invoices') THEN
+    INSERT INTO transactions(direction, counterparty, description, category, period, paid_on,
+                             amount, settled, due_on, company_id, project_id, created_at)
+    SELECT 'in',
+           co.name,
+           COALESCE(NULLIF(i.note,''), 'Invoice ' || i.number),
+           'project_fee',
+           date_trunc('month', i.issued_on)::date,
+           CASE WHEN i.status = 'paid' THEN
+             COALESCE((SELECT MAX(p.paid_on) FROM payments p WHERE p.invoice_id = i.id), i.issued_on)
+           END,
+           GREATEST(COALESCE((SELECT SUM(l.qty * l.unit_amount) FROM invoice_lines l
+                               WHERE l.invoice_id = i.id), 0), 1)::bigint,
+           i.status = 'paid',
+           i.due_on,
+           i.company_id, i.project_id, i.created_at
+      FROM invoices i JOIN companies co ON co.id = i.company_id
+     WHERE i.status <> 'void'
+       AND NOT EXISTS (SELECT 1 FROM transactions t
+                        WHERE t.description = COALESCE(NULLIF(i.note,''), 'Invoice ' || i.number)
+                          AND t.company_id = i.company_id);
+
+    DROP TABLE IF EXISTS invoice_lines CASCADE;
+    DROP TABLE IF EXISTS payments CASCADE;
+    DROP TABLE IF EXISTS invoices CASCADE;
+  END IF;
+END $$;
+
+-- ---------- performance ------------------------------------------------------
+-- REVERSAL: the first brief deliberately carried no per-person counts. The
+-- client has asked for a leaderboard, so the points live here — one row per
+-- task, so re-opening and re-closing a task corrects the score rather than
+-- awarding it twice.
+CREATE TABLE IF NOT EXISTS points_events (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('early','on_time','late','missed')),
+  points INTEGER NOT NULL,
+  difficulty TEXT NOT NULL,
+  month DATE NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS points_events_month_idx ON points_events(month, user_id);
+
+-- Defaults live in `settings` so the owner can retune them without a migration.
+CREATE OR REPLACE FUNCTION setting_num(k TEXT, fallback NUMERIC)
+  RETURNS NUMERIC LANGUAGE sql STABLE AS $$
+    SELECT COALESCE((SELECT value::numeric FROM settings WHERE key = k), fallback)
+$$;
+
+CREATE OR REPLACE FUNCTION points_for(difficulty TEXT, kind TEXT)
+  RETURNS INTEGER LANGUAGE sql STABLE AS $$
+    SELECT CASE kind
+      WHEN 'missed' THEN -setting_num('points_missed_penalty', 5)
+      WHEN 'late'   THEN -setting_num('points_late_penalty', 3)
+      ELSE (CASE difficulty
+              WHEN 'easy' THEN setting_num('points_easy', 5)
+              WHEN 'hard' THEN setting_num('points_hard', 20)
+              ELSE             setting_num('points_medium', 10) END)
+           + (CASE WHEN kind = 'early' THEN setting_num('points_early_bonus', 2) ELSE 0 END)
+    END::integer
+$$;
+
+-- Awarding is a trigger so every surface scores identically and nothing has to
+-- remember to call it.
+CREATE OR REPLACE FUNCTION trg_award_points() RETURNS TRIGGER
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE k TEXT; done_on DATE;
+BEGIN
+  IF NEW.assignee_id IS NULL THEN
+    DELETE FROM points_events WHERE task_id = NEW.id;
+    RETURN NEW;
+  END IF;
+
+  IF NEW.missed THEN
+    k := 'missed';
+  ELSIF NEW.status IN ('approved','completed') THEN
+    done_on := COALESCE(NEW.completed_at, now())::date;
+    k := CASE
+           WHEN NEW.due_date IS NULL       THEN 'on_time'
+           WHEN done_on <  NEW.due_date    THEN 'early'
+           WHEN done_on <= NEW.due_date    THEN 'on_time'
+           ELSE 'late' END;
+  ELSE
+    -- Re-opened: take the score back off the board.
+    DELETE FROM points_events WHERE task_id = NEW.id;
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO points_events(task_id, user_id, kind, points, difficulty, month)
+    VALUES (NEW.id, NEW.assignee_id, k, points_for(NEW.difficulty, k), NEW.difficulty,
+            date_trunc('month', COALESCE(NEW.completed_at, now()))::date)
+    ON CONFLICT (task_id) DO UPDATE
+      SET user_id = EXCLUDED.user_id, kind = EXCLUDED.kind, points = EXCLUDED.points,
+          difficulty = EXCLUDED.difficulty, month = EXCLUDED.month;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS award_points ON tasks;
+CREATE TRIGGER award_points AFTER INSERT OR UPDATE OF status, missed, assignee_id, difficulty, due_date
+  ON tasks FOR EACH ROW EXECUTE FUNCTION trg_award_points();
+
+-- Badges are named after creative festivals, low to high. Thresholds are
+-- settings, so the owner can retune them without a deploy.
+CREATE OR REPLACE FUNCTION badge_for(points INTEGER, late_count INTEGER, on_time_pct NUMERIC)
+  RETURNS TEXT LANGUAGE sql STABLE AS $$
+    SELECT CASE
+      WHEN points >= setting_num('badge_cannes_points', 200) AND on_time_pct >= 90 THEN 'cannes'
+      WHEN points >= setting_num('badge_baku_points', 120)                          THEN 'baku'
+      WHEN points >= setting_num('badge_jolbors_points', 60) AND late_count = 0     THEN 'jolbors'
+      WHEN points >  0                                                              THEN 'taf'
+      ELSE 'none' END
+$$;
+
+-- ---------- progress over time ------------------------------------------------
+-- The weekly report shows where each project stood at the start of the week
+-- versus now, which needs the earlier number to have been written down.
+CREATE TABLE IF NOT EXISTS progress_snapshots (
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  week_start DATE NOT NULL,
+  pct INTEGER NOT NULL,
+  PRIMARY KEY (project_id, week_start)
+);
+
+-- ---------- RLS for the v2 tables --------------------------------------------
+ALTER TABLE client_contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE client_contacts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS contacts_office ON client_contacts;
+CREATE POLICY contacts_office ON client_contacts FOR ALL TO am_app
+  USING (app_role() IN ('owner','accountant')) WITH CHECK (app_role() IN ('owner','accountant'));
+DROP POLICY IF EXISTS contacts_teammate ON client_contacts;
+CREATE POLICY contacts_teammate ON client_contacts FOR SELECT TO am_app
+  USING (app_role() IN ('teammate','editor') AND company_id IN (SELECT app_my_companies()));
+DROP POLICY IF EXISTS contacts_client ON client_contacts;
+CREATE POLICY contacts_client ON client_contacts FOR SELECT TO am_app
+  USING (app_role() = 'client' AND company_id = app_company_id());
+
+-- Phases drive the client's Timeline page, so clients read them.
+ALTER TABLE project_phases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_phases FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS phases_owner ON project_phases;
+CREATE POLICY phases_owner ON project_phases FOR ALL TO am_app
+  USING (app_role() = 'owner') WITH CHECK (app_role() = 'owner');
+DROP POLICY IF EXISTS phases_staff ON project_phases;
+CREATE POLICY phases_staff ON project_phases FOR SELECT TO am_app
+  USING (app_role() IN ('teammate','editor') AND project_id IN (SELECT app_my_projects()));
+DROP POLICY IF EXISTS phases_accountant ON project_phases;
+CREATE POLICY phases_accountant ON project_phases FOR SELECT TO am_app
+  USING (app_role() = 'accountant');
+DROP POLICY IF EXISTS phases_client ON project_phases;
+CREATE POLICY phases_client ON project_phases FOR SELECT TO am_app
+  USING (app_role() = 'client' AND project_id IN (SELECT app_client_projects()));
+
+-- Money: the same two roles as before, and no client policy at all.
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS accounts_finance ON accounts;
+CREATE POLICY accounts_finance ON accounts FOR ALL TO am_app
+  USING (app_role() IN ('owner','accountant')) WITH CHECK (app_role() IN ('owner','accountant'));
+
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS transactions_finance ON transactions;
+CREATE POLICY transactions_finance ON transactions FOR ALL TO am_app
+  USING (app_role() IN ('owner','accountant')) WITH CHECK (app_role() IN ('owner','accountant'));
+
+-- The leaderboard is meant to be seen by the team, so teammates read everyone's
+-- points. The accountant has no business here and clients never do.
+ALTER TABLE points_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE points_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS points_owner ON points_events;
+CREATE POLICY points_owner ON points_events FOR ALL TO am_app
+  USING (app_role() = 'owner') WITH CHECK (app_role() = 'owner');
+DROP POLICY IF EXISTS points_teammate ON points_events;
+CREATE POLICY points_teammate ON points_events FOR SELECT TO am_app
+  USING (app_role() IN ('teammate','editor'));
+
+ALTER TABLE progress_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE progress_snapshots FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS snapshots_staff ON progress_snapshots;
+CREATE POLICY snapshots_staff ON progress_snapshots FOR ALL TO am_app
+  USING (app_is_staff()) WITH CHECK (app_is_staff());
+
+-- ---------- client-safe views, revised ---------------------------------------
+-- REVERSAL: assignee_id is gone. The first brief showed clients who was doing
+-- the work because the client had asked for it; the revised spec says team
+-- members must not be visible on the client's view of a project. Removing it
+-- from the view rather than from the page means no future portal query can
+-- reintroduce it by accident.
+DROP VIEW IF EXISTS v_client_tasks;
+CREATE VIEW v_client_tasks WITH (security_invoker = true) AS
+  SELECT t.id, t.project_id, t.title, t.description,
+         CASE t.status
+           WHEN 'todo'            THEN 'coming_up'
+           WHEN 'in_progress'     THEN 'in_progress'
+           WHEN 'in_review'       THEN 'in_progress'   -- internal business
+           WHEN 'awaiting_client' THEN 'needs_you'
+           ELSE 'done'
+         END AS bucket,
+         (t.status = 'awaiting_client') AS needs_you,
+         t.client_due_date AS due,          -- never t.due_date
+         t.revision_round,
+         (SELECT MAX(version_no) FROM task_versions v WHERE v.task_id = t.id) AS version,
+         (SELECT count(*) FROM task_versions v WHERE v.task_id = t.id) AS version_count,
+         t.created_at
+    FROM tasks t;
+
+DROP VIEW IF EXISTS v_client_projects;
+CREATE VIEW v_client_projects WITH (security_invoker = true) AS
+  SELECT p.id, p.company_id, p.name, p.description, p.stage,
+         p.client_due_date AS due,          -- never p.due_date
+         p.starts_on,
+         pr.pct AS progress_pct, pr.done AS delivered, pr.total AS deliverables
+    FROM projects p
+    CROSS JOIN LATERAL project_progress(p.id, true) pr;
+
+CREATE OR REPLACE VIEW v_client_phases WITH (security_invoker = true) AS
+  SELECT ph.id, ph.project_id, ph.name, ph.starts_on, ph.ends_on, ph.position
+    FROM project_phases ph;
+
+-- Contracts and anything else deliberately shared with the client.
+CREATE OR REPLACE VIEW v_client_documents WITH (security_invoker = true) AS
+  SELECT f.id, f.company_id, f.project_id, f.name, f.mime, f.size_bytes,
+         f.external_url, f.created_at
+    FROM files f
+   WHERE f.kind = 'document';
+
+GRANT SELECT ON v_client_projects, v_client_tasks, v_client_comments,
+                v_client_files, v_client_approvals, v_client_phases,
+                v_client_documents TO am_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO am_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO am_app;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO am_app;
