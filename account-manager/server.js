@@ -8,6 +8,7 @@ const { getTeam, getNameMap } = require('./lib/team');
 const { createTelegram, validateInitData } = require('./lib/telegram');
 const { FILES_DIR } = require('./routes/files');
 const { runAlerts } = require('./lib/alerts');
+const { readSettings } = require('./routes/settings');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -29,7 +30,7 @@ const telegram = createTelegram({ controlPool, getTenantPool, withRls, asSystem,
 const deps = {
   auth, only, need, wrap, controlPool, getTenantPool, sign, verify, withRls,
   hashPin, verifyPin, normalisePhone,
-  getTeam, getNameMap,
+  getTeam, getNameMap, readSettings,
   notifyUser: telegram.notifyUser, notifyStaff: telegram.notifyStaff, notifyScope: telegram.notifyScope,
 };
 

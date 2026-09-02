@@ -98,23 +98,30 @@ async function main() {
     ]) await c.query('INSERT INTO project_members(project_id,user_id,craft) VALUES($1,$2,$3)', [p, u, craft]);
 
     const task = async (project, title, o = {}) => (await q(
-      `INSERT INTO tasks(project_id,title,description,status,visibility,assignee_id,due_date,client_due_date,
-                         is_deliverable,difficulty,requires_file,created_by,position,completed_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,'medium'),COALESCE($11,false),$12,$13,$14) RETURNING id`,
+      `INSERT INTO tasks(project_id,title,description,status,visibility,assignee_id,
+                         starts_on,due_date,client_starts_on,client_due_date,
+                         is_deliverable,difficulty,requires_file,phase_id,is_meeting,
+                         created_by,position,completed_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12,'medium'),COALESCE($13,false),
+              $14,COALESCE($15,false),$16,$17,$18) RETURNING id`,
       [project, title, o.description || '', o.status || 'todo', o.visibility || 'internal',
-       o.assignee || null, o.due || null, o.clientDue || null,
-       o.deliverable !== false, o.difficulty, o.requiresFile, ownerId, o.pos || 0,
-       o.completedAt || null])).id;
+       o.assignee || null, o.starts || null, o.due || null,
+       o.clientStarts || null, o.clientDue || null,
+       o.deliverable !== false, o.difficulty, o.requiresFile, o.phase || null, o.meeting,
+       ownerId, o.pos || 0, o.completedAt || null])).id;
 
     // ---- Osiyo / Ramadan: the flagship story ------------------------------
     const keyVisual = await task(ramadan.id, 'Key visual', {
       description: 'Master lockup for the campaign, adapted to 3 formats.',
-      status: 'awaiting_client', visibility: 'client_visible',
-      assignee: designer, due: day(-4), clientDue: day(-1), pos: 1 });
+      status: 'awaiting_client', visibility: 'client_visible', difficulty: 'hard',
+      assignee: designer, starts: day(-11), due: day(-4),
+      clientStarts: day(-11), clientDue: day(-1), pos: 11 });
     const posts = await task(ramadan.id, '6 feed posts', {
-      status: 'in_progress', visibility: 'client_visible', assignee: smm, due: day(3), clientDue: day(6), pos: 2 });
+      status: 'in_progress', visibility: 'client_visible', assignee: smm,
+      starts: day(-2), due: day(3), clientStarts: day(-2), clientDue: day(6), pos: 12 });
     const film = await task(ramadan.id, '20s cut', {
-      status: 'todo', visibility: 'client_visible', assignee: motion, due: day(5), clientDue: day(8), pos: 3 });
+      status: 'todo', visibility: 'client_visible', assignee: motion,
+      starts: day(2), due: day(5), clientStarts: day(2), clientDue: day(8), pos: 22 });
     await task(ramadan.id, 'Concepts we are NOT showing them', {
       description: 'Route B was a mess. Keep for the retro, never send.',
       status: 'completed', visibility: 'internal', assignee: designer, deliverable: false, pos: 9,
@@ -165,10 +172,59 @@ async function main() {
     await c.query(`UPDATE companies SET industry=$2, since_date=$3 WHERE id=$1`, [silk.id, 'Travel', day(-220)]);
     await c.query(`UPDATE companies SET industry=$2, since_date=$3 WHERE id=$1`, [zamin.id, 'Banking', day(-95)]);
 
-    // Phases drive the single-project timeline.
-    await c.query(`INSERT INTO project_phases(project_id,name,starts_on,ends_on,position) VALUES
-      ($1,'Concept',$2,$3,0), ($1,'Production',$4,$5,1), ($1,'Delivery',$6,$7,2)`,
-      [ramadan.id, day(-21), day(-8), day(-9), day(4), day(3), day(9)]);
+    // Stages, then the processes that sit under them. This mirrors the shape of
+    // the client's own planning sheet: a stage rail on the left, one row per
+    // process, each with a start and an end.
+    const phase = async (project, name, from, to, pos) => (await q(
+      `INSERT INTO project_phases(project_id,name,starts_on,ends_on,position)
+       VALUES($1,$2,$3,$4,$5) RETURNING id`, [project, name, from, to, pos])).id;
+
+    const brief   = await phase(ramadan.id, 'Brifing',            day(-24), day(-19), 0);
+    const strat   = await phase(ramadan.id, 'Strategiya',         day(-19), day(-10), 1);
+    const creative= await phase(ramadan.id, 'Kreativ ishlab chiqish', day(-11), day(2), 2);
+    const prod    = await phase(ramadan.id, 'Prodakshn',          day(1),   day(12), 3);
+    const launch  = await phase(ramadan.id, 'Ishga tushirish',    day(12),  day(20), 4);
+
+    const proc = (ph, title, from, to, status, o = {}) => task(ramadan.id, title, {
+      status, visibility: o.visibility || 'internal', assignee: o.assignee,
+      difficulty: o.difficulty || 'medium',
+      starts: from, due: to, clientStarts: o.clientStarts, clientDue: o.clientDue,
+      phase: ph, meeting: o.meeting, deliverable: o.deliverable !== false,
+      completedAt: ['completed', 'approved'].includes(status) ? new Date(Date.parse(to)) : null,
+      pos: o.pos || 0,
+    });
+
+    await proc(brief, 'Shartnomani kelishish',      day(-24), day(-22), 'completed', { assignee: ownerId, difficulty: 'easy', pos: 1, deliverable: false });
+    await proc(brief, 'Asoschisi bilan debrifing',  day(-23), day(-21), 'completed', { assignee: ownerId, difficulty: 'easy', pos: 2, deliverable: false });
+    await proc(brief, 'Brifni kelishish',           day(-22), day(-20), 'completed', { assignee: ownerId, difficulty: 'easy', pos: 3, deliverable: false });
+    await proc(brief, "Ma'lumot yigʻish",           day(-24), day(-19), 'completed', { assignee: copy, pos: 4, deliverable: false });
+
+    await proc(strat, 'Samarqandda intervyu va soʻrov', day(-19), day(-16), 'completed', { assignee: smm, difficulty: 'hard', pos: 5, deliverable: false });
+    await proc(strat, 'Market vizit — Samarqand',   day(-19), day(-17), 'completed', { assignee: smm, pos: 6, deliverable: false });
+    await proc(strat, 'Raqobatchilar tahlili',      day(-16), day(-12), 'in_progress', { assignee: copy, pos: 7, deliverable: false });
+    await proc(strat, 'Madaniy kontekst tahlili',   day(-15), day(-10), 'in_progress', { assignee: copy, difficulty: 'hard', pos: 8, deliverable: false });
+    await proc(strat, 'Xulosalarni jamlash',        day(-11), day(-8),  'todo', { assignee: copy, pos: 9, deliverable: false });
+    await proc(strat, 'Pozitsiyani ishlab chiqish', day(-9),  day(-6),  'todo', { assignee: ownerId, difficulty: 'hard', pos: 10, deliverable: false });
+
+    await proc(creative, 'Taqdimot — kreativ variantlar', day(-2), day(-2), 'todo',
+      { assignee: designer, meeting: true, pos: 13, deliverable: false });
+    await proc(creative, 'Konseptni kelishish',     day(-1),  day(2),  'todo', { assignee: ownerId, pos: 14, deliverable: false });
+    await proc(creative, 'Kreativ gʻoyani sayqallash', day(2), day(5), 'todo', { assignee: designer, pos: 15, deliverable: false });
+
+    await proc(prod, 'Prodakshn brif',              day(1),  day(3),  'todo', { assignee: ownerId, pos: 16, deliverable: false });
+    await proc(prod, 'Prodakshn boʻyicha tender',   day(3),  day(7),  'todo', { assignee: ownerId, difficulty: 'hard', pos: 17, deliverable: false });
+    await proc(prod, 'Pre prodakshn (suratga tayyorgarlik)', day(7), day(10), 'todo', { assignee: motion, difficulty: 'hard', pos: 18, deliverable: false });
+    await proc(prod, 'Videoroliklar prodakshni',    day(10), day(14), 'todo', { assignee: motion, difficulty: 'hard', pos: 19, deliverable: false });
+    await proc(prod, 'Postprodakshn (montaj)',      day(14), day(18), 'todo', { assignee: motion, difficulty: 'hard', pos: 20, deliverable: false });
+
+    await proc(launch, 'Reklama kampaniyasini ishga tushirish', day(19), day(22), 'todo', { assignee: smm, pos: 21, deliverable: false });
+
+    // The client-facing deliverables were created before the stages existed,
+    // so file them now — otherwise they sit in an "unstaged" group at the
+    // bottom of the chart, which is exactly the mess this replaces.
+    await c.query('UPDATE tasks SET phase_id=$1 WHERE id = ANY($2)', [creative, [keyVisual]]);
+    await c.query('UPDATE tasks SET phase_id=$1 WHERE id = ANY($2)', [prod, [posts, film]]);
+
     await c.query(`INSERT INTO project_phases(project_id,name,starts_on,ends_on,position) VALUES
       ($1,'Pre-production',$2,$3,0), ($1,'Shoot',$4,$5,1), ($1,'Post',$6,$7,2)`,
       [cards.id, day(-14), day(-5), day(-4), day(2), day(3), day(14)]);

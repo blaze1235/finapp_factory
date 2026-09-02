@@ -89,8 +89,10 @@ async function render() {
       class: P.tab === k ? 'on' : '', onclick: () => { P.tab = k; render(); },
     }, tl(k)))));
 
-  ({ project: tabProject, deliverables: tabDeliverables,
-     timeline: tabTimeline, documents: tabDocuments }[P.tab])(page, d);
+  // tabTimeline fetches its own grid, so the dispatcher tolerates a promise.
+  Promise.resolve(({ project: tabProject, deliverables: tabDeliverables,
+     timeline: tabTimeline, documents: tabDocuments }[P.tab])(page, d))
+    .catch(e => page.append(h('div', { class: 'err' }, e.message)));
 
   page.append(h('div', { class: 'tiny dim', style: { marginTop: '30px', textAlign: 'center' } },
     'Savol boʻlsa akkaunt menejeringizga Telegramda yozing.'));
@@ -172,35 +174,51 @@ function tabDeliverables(page, d) {
   }
 }
 
-// The client's timeline: their project's phases, scoped to them.
-function tabTimeline(page, d) {
-  if (!d.phases.length && !d.projects.length) return page.append(h('div', { class: 'card' },
-    h('div', { class: 'empty' }, 'Muddatlar hali belgilanmagan')));
-  for (const p of d.projects) {
-    const phases = d.phases.filter(ph => ph.project_id === p.id);
-    const dates = [...phases.flatMap(ph => [ph.starts_on, ph.ends_on]), p.starts_on, p.due]
-      .filter(Boolean).map(x => Date.parse(String(x).slice(0, 10)));
-    if (!dates.length) continue;
-    const min = Math.min(...dates, Date.now()), max = Math.max(...dates, Date.now());
-    const span = Math.max(1, max - min);
-    const pct = x => ((Date.parse(String(x).slice(0, 10)) - min) / span) * 100;
+// The client's timeline is the same grid the team sees, built from the
+// client-safe views — so it carries the padded dates and no internal ones,
+// and the two sides are looking at one picture rather than two.
+async function tabTimeline(page, d) {
+  const box = h('div', { class: 'card' }, h('div', { class: 'spin' }));
+  page.append(box);
+  let g;
+  try { g = await GET('/api/portal/gantt'); }
+  catch (e) { return clear(box).append(h('div', { class: 'err' }, e.message)); }
 
-    page.append(h('div', { class: 'card', style: { marginBottom: '12px' } },
-      h('b', p.name),
-      h('div', { style: { marginTop: '12px' } }, ...phases.map(ph => h('div', { style: { marginBottom: '11px' } },
-        h('div', { class: 'row tiny' }, h('span', ph.name),
-          h('span', { class: 'sp dim' },
-            [ph.starts_on && fmtDate(ph.starts_on), ph.ends_on && fmtDate(ph.ends_on)].filter(Boolean).join(' → '))),
-        h('div', { class: 'ptrack' },
-          ph.starts_on && ph.ends_on
-            ? h('i', { style: { left: pct(ph.starts_on) + '%',
-                                width: Math.max(2, pct(ph.ends_on) - pct(ph.starts_on)) + '%' } })
-            : null,
-          h('span', { class: 'pnow', style: { left: pct(new Date().toISOString().slice(0, 10)) + '%' } }))))),
-      p.due ? h('div', { class: 'row tiny', style: { marginTop: '6px', paddingTop: '9px',
-                                                     borderTop: '1px solid var(--line-soft)' } },
-        h('b', 'Topshirish'), h('span', { class: 'sp mono' }, fmtDate(p.due))) : null));
+  if (!g.rows_by_project) {
+    // Group per project so a client with two live projects gets two charts
+    // rather than one chart with two unrelated halves.
+    g.rows_by_project = {};
+    for (const t of g.tasks) (g.rows_by_project[t.project_id] ||= []).push(t);
   }
+  clear(box);
+  const wrap = h('div', {});
+  box.replaceWith(wrap);
+
+  for (const p of g.projects) {
+    const rows = (g.rows_by_project[p.id] || []).map(t => ({
+      id: t.id, title: t.title, phase_id: t.phase_id, state: t.state,
+      span: t.starts || t.due ? { from: t.starts || t.due, to: t.due || t.starts } : null,
+    }));
+    wrap.append(h('div', { class: 'card', style: { marginBottom: '14px' } },
+      h('b', p.name),
+      h('div', { style: { marginTop: '12px' } }, renderGantt({
+        columns: g.columns, today: g.today, rows,
+        phases: g.phases.filter(ph => ph.project_id === p.id),
+      }, {
+        compact: true,
+        statusColumn: true,
+        hideEmptyStages: true,
+        onRow: r => openDeliverable(r.id),
+        processLabel: tl('deliverables'),
+        statusLabel: 'Holat',
+        unphasedLabel: '—',
+        emptyStageText: '—',
+        emptyText: 'Muddatlar hali belgilanmagan',
+        footnote: 'Sanalar sizning qaror qabul qilish vaqtingizni oʻz ichiga olmaydi.',
+      }))));
+  }
+  if (!g.projects.length) wrap.append(h('div', { class: 'card' },
+    h('div', { class: 'empty' }, 'Muddatlar hali belgilanmagan')));
 }
 
 function tabDocuments(page, d) {

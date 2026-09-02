@@ -687,46 +687,62 @@ async function viewCalendar(el) {
 }
 
 async function singleProjectTimeline(el, id) {
-  const d = await GET(`/api/calendar/projects/${id}`);
+  const d = await GET(`/api/calendar/projects/${id}/gantt`);
   clear(el);
   const back = () => { State.data.calProject = null; viewCalendar(el); };
-  el.append(pageHead(d.project.name, `${d.project.company_name} · ${STAGE_LABEL[d.project.stage]}`,
+  const reload = () => singleProjectTimeline(el, id);
+  const showPadding = State.data.ganttPadding || false;
+
+  el.append(pageHead(d.project.name,
+    `${d.project.company_name} · ${STAGE_LABEL[d.project.stage] || d.project.stage}`,
+    h('div', { class: 'seg' },
+      h('button', {
+        class: State.data.ganttCompact ? '' : 'on',
+        onclick: () => { State.data.ganttCompact = false; reload(); },
+      }, 'Keng'),
+      h('button', {
+        class: State.data.ganttCompact ? 'on' : '',
+        onclick: () => { State.data.ganttCompact = true; reload(); },
+      }, 'Ixcham')),
     State.me.role === 'owner'
-      ? h('button', { class: 'btn', onclick: () => editPhase(id, null, () => singleProjectTimeline(el, id)) }, '+ Bosqich') : null,
+      ? h('button', {
+          class: showPadding ? 'btn pri' : 'btn',
+          title: 'Ichki sana bilan mijozga aytilgan sana orasidagi zaxirani koʻrsatish',
+          onclick: () => { State.data.ganttPadding = !showPadding; reload(); },
+        }, '⇥ Zaxira')
+      : null,
+    State.me.role === 'owner'
+      ? h('button', { class: 'btn', onclick: () => editPhase(id, null, reload) }, '+ Bosqich') : null,
     h('button', { class: 'btn ghost', onclick: back }, '‹ Barchasi')));
 
-  const items = [...d.phases, d.project];
-  const w = timelineWindow(items);
-  const rows = d.phases.map(ph => {
-    const from = pctIn(w, ph.starts_on), to = pctIn(w, ph.ends_on);
-    const track = h('div', { class: 'tl-track' });
-    if (from !== null && to !== null && to > from)
-      track.append(h('div', { class: 'tl-bar phase', style: { left: from + '%', width: Math.max(1.5, to - from) + '%' } }));
-    const nm = nowMarker(w); if (nm) track.append(nm);
-    return h('div', { class: 'tl-row' },
-      h('div', { class: 'row' },
-        h('div', {}, h('div', { style: { fontWeight: 550 } }, ph.name),
-          h('div', { class: 'tiny dim' }, [ph.starts_on && fmtDate(ph.starts_on), ph.ends_on && fmtDate(ph.ends_on)]
-            .filter(Boolean).join(' → '))),
-        State.me.role === 'owner'
-          ? h('button', { class: 'btn sm ghost sp', onclick: e => { e.stopPropagation();
-              editPhase(id, ph, () => singleProjectTimeline(el, id)); } }, '✎') : null),
-      track);
-  });
+  el.append(h('div', { class: 'card' }, renderGantt(d, {
+    compact: State.data.ganttCompact,
+    showPadding,
+    onRow: r => openTask(r.id),
+    processLabel: 'Jarayonlar',
+    statusLabel: 'Holat',
+    unphasedLabel: 'Bosqichsiz',
+    emptyStageText: 'Hali jarayon qoʻshilmagan',
+    footnote: 'Koʻrsatilgan muddatlar mijozning qaror qabul qilish vaqtini oʻz ichiga olmaydi.',
+  })));
 
-  // The final delivery marker sits on its own row so it reads as a date, not a phase.
-  const delivery = pctIn(w, d.project.client_due_date || d.project.due_date);
-  const deliveryTrack = h('div', { class: 'tl-track' });
-  if (delivery !== null) deliveryTrack.append(h('div', { class: 'tl-mark', style: { left: delivery + '%' } }));
-  const nm2 = nowMarker(w); if (nm2) deliveryTrack.append(nm2);
+  // Stages are edited here rather than on the chart itself: dragging a stage
+  // and dragging a task would be the same gesture meaning two different things.
+  if (State.me.role === 'owner' && d.phases.length) {
+    el.append(h('div', { class: 'card' }, h('h2', 'Bosqichlar'),
+      h('div', { class: 'list' }, ...d.phases.map(ph => h('div', {
+        class: 'item', onclick: () => editPhase(id, ph, reload),
+      },
+        h('div', {}, h('div', { class: 't' }, ph.name),
+          h('div', { class: 's' }, [ph.starts_on && fmtDate(ph.starts_on), ph.ends_on && fmtDate(ph.ends_on)]
+            .filter(Boolean).join(' → ') || 'sanasiz')),
+        h('div', { class: 'r' },
+          h('span', { class: 'pill' }, `${d.rows.filter(r => r.phase_id === ph.id).length} jarayon`),
+          h('span', { class: 'dim' }, '✎')))))));
+  }
 
-  el.append(h('div', { class: 'card' }, h('div', { class: 'tl-grid' }, h('div', { class: 'tl-rows' },
-    monthAxis(w),
-    ...(rows.length ? rows : [h('div', { class: 'empty' }, 'Bosqichlar hali qoʻshilmagan')]),
-    h('div', { class: 'tl-row' },
-      h('div', {}, h('div', { style: { fontWeight: 550 } }, 'Topshirish'),
-        h('div', { class: 'tiny dim' }, fmtDate(d.project.client_due_date || d.project.due_date))),
-      deliveryTrack)))));
+  if (!d.rows.length) el.append(h('div', { class: 'card' },
+    emptyBox('▦', 'Bu loyihada hali sanasi belgilangan ish yoʻq')));
 }
 
 function editPhase(projectId, phase, done) {

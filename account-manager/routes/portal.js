@@ -26,6 +26,41 @@ module.exports = ({ auth, only, wrap, notifyStaff, notifyScope }) => {
     res.json(data);
   }));
 
+  // The client's own Gantt: same shape as the internal one, built only from
+  // v_client_* views, so it carries client dates and no internal ones.
+  r.get('/gantt', wrap(async (req, res) => {
+    const { buildColumns } = require('./calendar');
+    const settings = await req.sql(`SELECT value FROM settings WHERE key='working_days'`)
+      .then(r2 => (r2[0]?.value || 'mon,tue,wed,thu,fri').split(',').map(x => x.trim()))
+      .catch(() => ['mon', 'tue', 'wed', 'thu', 'fri']);
+
+    const out = await req.q(async c => {
+      const q = (t, p) => c.query(t, p).then(x => x.rows);
+      const projects = await q(`SELECT * FROM v_client_projects ORDER BY due NULLS LAST, id`);
+      const phases = await q(`SELECT * FROM v_client_phases ORDER BY project_id, position, id`);
+      const tasks = await q(
+        `SELECT t.*, client_state(tk.status, t.is_meeting) AS state
+           FROM v_client_tasks t JOIN tasks tk ON tk.id = t.id
+          ORDER BY t.project_id, t.id`);
+      return { projects, phases, tasks };
+    });
+
+    const dates = [];
+    for (const t of out.tasks) { if (t.starts) dates.push(t.starts); if (t.due) dates.push(t.due); }
+    for (const p of out.phases) { if (p.starts_on) dates.push(p.starts_on); if (p.ends_on) dates.push(p.ends_on); }
+    for (const p of out.projects) { if (p.starts_on) dates.push(p.starts_on); if (p.due) dates.push(p.due); }
+    const today = new Date().toISOString().slice(0, 10);
+    dates.push(today);
+    const iso = dates.map(d => String(d).slice(0, 10)).sort();
+    const pad = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+
+    res.json({
+      ...out,
+      columns: buildColumns(pad(iso[0], -3), pad(iso[iso.length - 1], 3), settings),
+      today,
+    });
+  }));
+
   r.get('/tasks/:id', wrap(async (req, res) => {
     const id = Number(req.params.id);
     const out = await req.q(async c => {

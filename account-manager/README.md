@@ -90,6 +90,36 @@ join links that let an invitee set their own PIN, Documents for clients,
 a Settings page, and weekly progress snapshots so the report can show where
 each project stood on Monday against where it stands now.
 
+## The timeline (§6, revised)
+
+The client's reference for "calendar" turned out to be a planning sheet, not a
+portfolio view: **rows are processes grouped by stage, columns are working
+days, and each cell is coloured by state** — grey planned, yellow in progress,
+green done, red for a presentation date. `public/gantt.js` reproduces that
+structure and is shared by the agency view and the client portal, because two
+renderers drawing the same dates would eventually disagree about them.
+
+What it does that the spreadsheet cannot:
+
+- a run of days is **one rounded bar**, not a row of hard cells
+- the date header and the process column are **pinned on both axes** in a
+  single scroll container, so neither is lost on a chart that is wider than the
+  screen and taller than the window
+- **weekends are absent** rather than greyed — from `settings.working_days`, so
+  an agency that works Saturdays gets Saturdays
+- today is a line you can find without counting columns
+- status is **derived from the task**, so it cannot read "done" while the work
+  sits open
+- every bar is a button that opens the task
+- the owner can toggle **⇥ Zaxira** to see the padding between the real date and
+  the one the client was told, drawn as a dashed outline behind the bar
+
+Tasks gained `starts_on` (a span instead of a due day), `phase_id` (the stage
+rail — `project_phases` already modelled exactly those stages), and
+`is_meeting` (their red cells). Each has a client-facing twin where it matters:
+the portal grid is built from `v_client_*` only, so it carries the padded dates
+and never the internal ones.
+
 ## Roles
 
 | Role | Sees | Enforced by |
@@ -165,7 +195,7 @@ npm test
 ```
 
 `scripts/flow-test.js` drives the whole product over real HTTP against a
-throwaway agency, then drops it — **139 checks**. The visibility ones are the point;
+throwaway agency, then drops it — **158 checks**. The visibility ones are the point;
 each is a client relationship that a forgotten filter would have destroyed. The
 last section re-proves the boundaries **with every route bypassed**, querying
 the database directly as each role, so the routes could all be wrong and it

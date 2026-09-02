@@ -385,6 +385,61 @@ async function main() {
   ok('a client cannot reach the internal calendar',
      (await call(client, 'GET', '/api/calendar')).status === 403);
 
+  section('The timeline grid');
+  const gPhase = (await call(owner, 'POST', `/api/calendar/projects/${proj.id}/phases`,
+    { name: 'Strategy', starts_on: '2026-08-01', ends_on: '2026-08-20' })).body;
+  const spanTask = (await call(owner, 'POST', '/api/tasks', {
+    project_id: proj.id, title: 'A spanning process', assignee_id: designerId,
+    starts_on: '2026-08-05', due_date: '2026-08-12',
+    client_starts_on: '2026-08-05', client_due_date: '2026-08-18',
+    phase_id: gPhase.id, visibility: 'client_visible' })).body;
+  const meeting = (await call(owner, 'POST', '/api/tasks', {
+    project_id: proj.id, title: 'Concept presentation', starts_on: '2026-08-14',
+    due_date: '2026-08-14', is_meeting: true, phase_id: gPhase.id })).body;
+  ok('a task can carry a start as well as a due date', spanTask.starts_on && spanTask.due_date);
+  ok('a task can be filed under a stage', spanTask.phase_id === gPhase.id);
+  ok('a presentation date is its own kind of row', meeting.is_meeting === true);
+  const backwards = await call(owner, 'POST', '/api/tasks',
+    { project_id: proj.id, title: 'Ends before it starts', starts_on: '2026-08-20', due_date: '2026-08-01' });
+  ok('a span that ends before it starts is refused', backwards.status >= 400, `got ${backwards.status}`);
+
+  const gantt = (await call(owner, 'GET', `/api/calendar/projects/${proj.id}/gantt`)).body;
+  ok('the grid comes back with columns and rows', gantt.columns.length > 0 && gantt.rows.length > 0);
+  ok('weekends are absent from the columns, not greyed',
+     gantt.columns.every(c => !['sat', 'sun'].includes(c.dow)),
+     gantt.columns.filter(c => ['sat', 'sun'].includes(c.dow)).map(c => c.date).join(','));
+  ok('columns are contiguous working days in order',
+     gantt.columns.every((c, i) => i === 0 || c.date > gantt.columns[i - 1].date));
+  ok('the window covers the work', gantt.columns[0].date <= '2026-08-05'
+     && gantt.columns[gantt.columns.length - 1].date >= '2026-08-14');
+  const gRow = gantt.rows.find(r => r.id === spanTask.id);
+  ok('a row carries both the real span and the padded one',
+     gRow.span.to === '2026-08-12' && gRow.client_span.to === '2026-08-18');
+
+  const cg = await call(client, 'GET', '/api/portal/gantt');
+  ok('the client gets the same grid shape', cg.status === 200 && cg.body.columns.length > 0);
+  const cRow = cg.body.tasks.find(x => x.id === spanTask.id);
+  ok('the client row exists for a client-visible process', !!cRow);
+  ok('...and carries the padded date, never the internal one',
+     cRow.due === '2026-08-18', `got ${cRow.due}`);
+  const gridLeaks = findForbidden(cg.body.tasks,
+    ['due_date', 'starts_on', 'client_due_date', 'client_starts_on', 'assignee', 'assignee_id', 'visibility']);
+  ok('no task row in the client grid carries an internal date',
+     gridLeaks.length === 0, gridLeaks.join(','));
+  ok('the client grid never mentions a teammate',
+     !JSON.stringify(cg.body).includes('Designer'));
+  ok('an internal-only process is absent from the client grid',
+     !cg.body.tasks.some(x => x.id === meeting.id));
+  ok('the client cannot reach the internal grid',
+     (await call(client, 'GET', `/api/calendar/projects/${proj.id}/gantt`)).status === 403);
+
+  const sched = await call(owner, 'POST', `/api/projects/${proj.id}/schedule`,
+    { tasks: [{ id: spanTask.id, starts_on: '2026-08-06', due_date: '2026-08-13' }] });
+  ok('bars can be rescheduled in one call', sched.status === 200 && sched.body.updated.includes(spanTask.id));
+  ok('a member cannot reschedule the plan',
+     (await call(designer, 'POST', `/api/projects/${proj.id}/schedule`,
+       { tasks: [{ id: spanTask.id, due_date: '2026-09-01' }] })).status === 403);
+
   section('Client contacts and join links (§7)');
   const contact = await call(owner, 'POST', `/api/companies/${acme.id}/contacts`,
     { name: 'Second Person', position: 'Brand manager', email: 'x@acme.test', is_main: false });
@@ -465,8 +520,11 @@ async function main() {
     companies: (await c.query('SELECT name FROM companies')).rows.map(r => r.name),
     projects: (await c.query('SELECT name FROM projects')).rows.map(r => r.name),
   }));
-  ok('raw SELECT * on tasks returns only the client-visible one',
-     raw.tasks.length === 1 && raw.tasks[0] === 'Key visual', raw.tasks.join('|'));
+  ok('raw SELECT * on tasks returns only client-visible rows',
+     raw.tasks.length > 0 && raw.tasks.every(t2 => ['Key visual', 'A spanning process'].includes(t2)),
+     raw.tasks.join('|'));
+  ok('raw SELECT * on tasks excludes the internal one',
+     !raw.tasks.includes('INTERNAL-ONLY-CONCEPT-GRAVEYARD'));
   ok('raw SELECT * on comments returns no internal comment',
      !raw.comments.some(b => b.includes('INTERNAL-GRUMBLE')));
   ok('raw SELECT * on the money ledger returns nothing', raw.money === 0);

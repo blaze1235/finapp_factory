@@ -188,6 +188,30 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyUser }) => {
     res.json(p);
   }));
 
+  // Reordering rows and moving bars on the timeline, in one call, so dragging
+  // does not fire a request per row.
+  r.post('/projects/:id/schedule', only('owner', 'editor'), wrap(async (req, res) => {
+    const changes = Array.isArray(req.body.tasks) ? req.body.tasks.slice(0, 200) : [];
+    if (!changes.length) return res.status(400).json({ error: 'Nothing to reschedule' });
+    const projectId = Number(req.params.id);
+    const out = await req.q(async c => {
+      const done = [];
+      for (const ch of changes) {
+        const sets = [], vals = [];
+        for (const k of ['starts_on', 'due_date', 'client_starts_on', 'client_due_date', 'phase_id', 'position'])
+          if (k in ch) { sets.push(`${k}=$${sets.length + 1}`); vals.push(ch[k] === '' ? null : ch[k]); }
+        if (!sets.length) continue;
+        vals.push(Number(ch.id), projectId);
+        const r2 = await c.query(
+          `UPDATE tasks SET ${sets.join(',')}
+            WHERE id=$${vals.length - 1} AND project_id=$${vals.length} RETURNING id`, vals);
+        if (r2.rows.length) done.push(r2.rows[0].id);
+      }
+      return done;
+    });
+    res.json({ updated: out });
+  }));
+
   r.get('/projects/:id', wrap(async (req, res) => {
     const id = Number(req.params.id);
     const out = await req.q(async c => {
@@ -295,22 +319,27 @@ module.exports = ({ auth, only, wrap, getNameMap, notifyUser }) => {
       ? req.user.id
       : (b.assignee_id || null);
     const rows = await req.sql(
-      `INSERT INTO tasks(project_id,title,description,status,visibility,assignee_id,due_date,
-                         client_due_date,is_deliverable,difficulty,requires_file,position,created_by)
-       VALUES($1,$2,$3,COALESCE($4,'todo'),$5,$6,$7,$8,COALESCE($9,true),
-              COALESCE($10,'medium'),COALESCE($11,false),
-              COALESCE((SELECT MAX(position)+1 FROM tasks WHERE project_id=$1),0),$12)
+      `INSERT INTO tasks(project_id,title,description,status,visibility,assignee_id,
+                         starts_on,due_date,client_starts_on,client_due_date,
+                         is_deliverable,difficulty,requires_file,phase_id,is_meeting,
+                         position,created_by)
+       VALUES($1,$2,$3,COALESCE($4,'todo'),$5,$6,$7,$8,$9,$10,COALESCE($11,true),
+              COALESCE($12,'medium'),COALESCE($13,false),$14,COALESCE($15,false),
+              COALESCE((SELECT MAX(position)+1 FROM tasks WHERE project_id=$1),0),$16)
        RETURNING *`,
       [b.project_id, b.title, b.description || '', b.status, visibility,
-       assignee, b.due_date || null, b.client_due_date || null,
-       b.is_deliverable, b.difficulty, b.requires_file, req.user.id]);
+       assignee, b.starts_on || null, b.due_date || null,
+       b.client_starts_on || null, b.client_due_date || null,
+       b.is_deliverable, b.difficulty, b.requires_file,
+       b.phase_id || null, b.is_meeting, req.user.id]);
     res.json(rows[0]);
   }));
 
   r.patch('/tasks/:id', wrap(async (req, res) => {
     const allowed = ['title', 'description', 'status', 'visibility', 'assignee_id',
-                     'due_date', 'client_due_date', 'is_deliverable', 'position',
-                     'difficulty', 'requires_file', 'missed'];
+                     'starts_on', 'due_date', 'client_starts_on', 'client_due_date',
+                     'is_deliverable', 'position', 'difficulty', 'requires_file',
+                     'missed', 'phase_id', 'is_meeting'];
     const sets = [], vals = [];
     for (const k of allowed) if (k in req.body) { sets.push(`${k}=$${sets.length + 1}`); vals.push(req.body[k]); }
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });

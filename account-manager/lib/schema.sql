@@ -840,6 +840,26 @@ CREATE TABLE IF NOT EXISTS project_phases (
 );
 CREATE INDEX IF NOT EXISTS project_phases_project_idx ON project_phases(project_id);
 
+-- A task without a start is a one-day bar on its due date; giving it a start
+-- turns it into a span. Left nullable so nothing existing has to be backfilled.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS starts_on DATE;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_starts_on DATE;
+
+-- The stage rail down the left of their sheet. Phases already model exactly
+-- this, so tasks hang off them rather than gaining a parallel "stage" column
+-- that could disagree with the phase dates.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS phase_id INTEGER REFERENCES project_phases(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS tasks_phase_idx ON tasks(phase_id);
+
+-- Their red cells: "дата встречи для презентации". A presentation is a fixed
+-- appointment, not work in progress, so it is its own thing rather than a
+-- status — it can be scheduled while the work feeding it is still yellow.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS is_meeting BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_span_check;
+ALTER TABLE tasks ADD CONSTRAINT tasks_span_check
+  CHECK (starts_on IS NULL OR due_date IS NULL OR due_date >= starts_on);
+
 -- ---------- documents --------------------------------------------------------
 -- Contracts (shartnoma) hang off the client, not a task, so files gains a
 -- company scope and a 'document' kind for the client's Documents page.
@@ -1102,6 +1122,9 @@ CREATE VIEW v_client_tasks WITH (security_invoker = true) AS
          END AS bucket,
          (t.status = 'awaiting_client') AS needs_you,
          t.client_due_date AS due,          -- never t.due_date
+         t.client_starts_on AS starts,      -- never t.starts_on
+         t.phase_id,
+         t.is_meeting,
          t.revision_round,
          (SELECT MAX(version_no) FROM task_versions v WHERE v.task_id = t.id) AS version,
          (SELECT count(*) FROM task_versions v WHERE v.task_id = t.id) AS version_count,
@@ -1121,6 +1144,18 @@ CREATE OR REPLACE VIEW v_client_phases WITH (security_invoker = true) AS
   SELECT ph.id, ph.project_id, ph.name, ph.starts_on, ph.ends_on, ph.position
     FROM project_phases ph;
 
+-- The three words the client's own sheet uses in its status column. Derived
+-- from the internal status, so "in review" never leaks out as its own state.
+CREATE OR REPLACE FUNCTION client_state(status TEXT, is_meeting BOOLEAN)
+  RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE
+      WHEN is_meeting                              THEN 'meeting'
+      WHEN status IN ('approved','completed')      THEN 'done'
+      WHEN status IN ('in_progress','in_review')   THEN 'in_action'
+      WHEN status = 'awaiting_client'              THEN 'in_action'
+      ELSE 'planned' END
+$$;
+
 -- Contracts and anything else deliberately shared with the client.
 CREATE OR REPLACE VIEW v_client_documents WITH (security_invoker = true) AS
   SELECT f.id, f.company_id, f.project_id, f.name, f.mime, f.size_bytes,
@@ -1134,3 +1169,19 @@ GRANT SELECT ON v_client_projects, v_client_tasks, v_client_comments,
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO am_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO am_app;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO am_app;
+
+
+-- #############################################################################
+-- v3 — the timeline the client actually meant
+--
+-- Their reference is a Gantt: rows are *processes grouped by stage*, columns are
+-- working days, and each cell is coloured by state. Three things it needs that
+-- the task table did not carry:
+--   * a start date, so a task is a span rather than a single due day
+--   * a stage to sit under — project_phases already are those stages
+--   * a way to mark a presentation date, which their sheet paints red
+-- #############################################################################
+
+-- A phase belongs to the project its tasks are in; nothing enforces that
+-- across the FK, so the API checks it and this index makes the check cheap.
+CREATE INDEX IF NOT EXISTS project_phases_pos_idx ON project_phases(project_id, position);
