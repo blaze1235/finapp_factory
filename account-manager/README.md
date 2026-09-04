@@ -120,6 +120,31 @@ rail — `project_phases` already modelled exactly those stages), and
 the portal grid is built from `v_client_*` only, so it carries the padded dates
 and never the internal ones.
 
+## Two views of one plan
+
+`public/roadmap.js` (**Reja**) and `public/gantt.js` (**Jadval**) render the same
+dates for two different jobs.
+
+**Reja** is the presentation view, built to the design references the client
+sent. The structural difference is that time is **continuous**: a bar is placed
+by where its dates fall in the window, not snapped to a column of days. That one
+change is most of why the references read as designed rather than as a
+spreadsheet — bars begin and end where the work does, mid-week if that is the
+truth. Colour carries the **stage**, so the eye groups the plan the way the plan
+is organised; status is carried by treatment (filled, filled with a live dot,
+tinted-and-outlined, hatched), so both readings are available without fighting.
+The owner can swap the two with the Bosqich/Holat toggle. A presentation is a
+diamond marker rather than a bar, because it is a moment, not a duration.
+
+**Jadval** is the operating view — the dense weekday grid built from the
+client's original planning sheet, with a pinned process column and status
+column. Better for a Tuesday morning; worse for a meeting room.
+
+Type is **Unbounded** (display) over **Golos Text** (UI). Both carry full
+Cyrillic, which is not optional: the same screens ship in Latin Uzbek, Cyrillic
+Russian and English, and a face that drops out on one of them looks broken in
+that language.
+
 ## Roles
 
 | Role | Sees | Enforced by |

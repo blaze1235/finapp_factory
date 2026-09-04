@@ -691,43 +691,59 @@ async function singleProjectTimeline(el, id) {
   clear(el);
   const back = () => { State.data.calProject = null; viewCalendar(el); };
   const reload = () => singleProjectTimeline(el, id);
-  const showPadding = State.data.ganttPadding || false;
+
+  // Two readings of one plan. The roadmap is what you show a client; the grid
+  // is what you work out of on a Tuesday. Same dates, same source.
+  const mode = State.data.tlMode || 'roadmap';
+  const scale = State.data.tlScale || 'week';
+  const colorBy = State.data.tlColorBy || 'stage';
+  const showPadding = State.data.tlPadding || false;
+  const set = (k, v) => { State.data[k] = v; reload(); };
 
   el.append(pageHead(d.project.name,
     `${d.project.company_name} · ${STAGE_LABEL[d.project.stage] || d.project.stage}`,
     h('div', { class: 'seg' },
-      h('button', {
-        class: State.data.ganttCompact ? '' : 'on',
-        onclick: () => { State.data.ganttCompact = false; reload(); },
-      }, 'Keng'),
-      h('button', {
-        class: State.data.ganttCompact ? 'on' : '',
-        onclick: () => { State.data.ganttCompact = true; reload(); },
-      }, 'Ixcham')),
-    State.me.role === 'owner'
-      ? h('button', {
-          class: showPadding ? 'btn pri' : 'btn',
-          title: 'Ichki sana bilan mijozga aytilgan sana orasidagi zaxirani koʻrsatish',
-          onclick: () => { State.data.ganttPadding = !showPadding; reload(); },
-        }, '⇥ Zaxira')
-      : null,
-    State.me.role === 'owner'
-      ? h('button', { class: 'btn', onclick: () => editPhase(id, null, reload) }, '+ Bosqich') : null,
+      h('button', { class: mode === 'roadmap' ? 'on' : '', onclick: () => set('tlMode', 'roadmap') }, 'Reja'),
+      h('button', { class: mode === 'grid' ? 'on' : '', onclick: () => set('tlMode', 'grid') }, 'Jadval')),
     h('button', { class: 'btn ghost', onclick: back }, '‹ Barchasi')));
 
-  el.append(h('div', { class: 'card' }, renderGantt(d, {
-    compact: State.data.ganttCompact,
-    showPadding,
-    onRow: r => openTask(r.id),
-    processLabel: 'Jarayonlar',
-    statusLabel: 'Holat',
-    unphasedLabel: 'Bosqichsiz',
-    emptyStageText: 'Hali jarayon qoʻshilmagan',
-    footnote: 'Koʻrsatilgan muddatlar mijozning qaror qabul qilish vaqtini oʻz ichiga olmaydi.',
-  })));
+  const controls = h('div', { class: 'row', style: { gap: '10px', marginBottom: '14px', flexWrap: 'wrap' } });
+  if (mode === 'roadmap') {
+    controls.append(
+      h('div', { class: 'seg' },
+        h('button', { class: scale === 'week' ? 'on' : '', onclick: () => set('tlScale', 'week') }, rw().scale.week),
+        h('button', { class: scale === 'month' ? 'on' : '', onclick: () => set('tlScale', 'month') }, rw().scale.month)),
+      h('div', { class: 'seg' },
+        h('button', { class: colorBy === 'stage' ? 'on' : '', onclick: () => set('tlColorBy', 'stage') }, rw().by.stage),
+        h('button', { class: colorBy === 'status' ? 'on' : '', onclick: () => set('tlColorBy', 'status') }, rw().by.status)));
+  } else {
+    controls.append(h('div', { class: 'seg' },
+      h('button', { class: State.data.ganttCompact ? '' : 'on', onclick: () => set('ganttCompact', false) }, 'Keng'),
+      h('button', { class: State.data.ganttCompact ? 'on' : '', onclick: () => set('ganttCompact', true) }, 'Ixcham')));
+  }
+  if (State.me.role === 'owner') controls.append(
+    h('button', {
+      class: showPadding ? 'btn pri' : 'btn',
+      title: 'Ichki sana bilan mijozga aytilgan sana orasidagi zaxirani koʻrsatish',
+      onclick: () => set('tlPadding', !showPadding),
+    }, '⇥ Zaxira'),
+    h('button', { class: 'btn', onclick: () => editPhase(id, null, reload) }, '+ Bosqich'));
+  el.append(controls);
 
-  // Stages are edited here rather than on the chart itself: dragging a stage
-  // and dragging a task would be the same gesture meaning two different things.
+  const footnote = 'Koʻrsatilgan muddatlar mijozning qaror qabul qilish vaqtini oʻz ichiga olmaydi.';
+  el.append(mode === 'roadmap'
+    ? renderRoadmap(d, {
+        scale, colorBy, showPadding, footnote,
+        onRow: r => openTask(r.id),
+        unphasedLabel: 'Bosqichsiz',
+      })
+    : h('div', { class: 'card' }, renderGantt(d, {
+        compact: State.data.ganttCompact, showPadding, footnote,
+        onRow: r => openTask(r.id),
+        processLabel: 'Jarayonlar', statusLabel: 'Holat',
+        unphasedLabel: 'Bosqichsiz', emptyStageText: 'Hali jarayon qoʻshilmagan',
+      })));
+
   if (State.me.role === 'owner' && d.phases.length) {
     el.append(h('div', { class: 'card' }, h('h2', 'Bosqichlar'),
       h('div', { class: 'list' }, ...d.phases.map(ph => h('div', {
@@ -740,9 +756,6 @@ async function singleProjectTimeline(el, id) {
           h('span', { class: 'pill' }, `${d.rows.filter(r => r.phase_id === ph.id).length} jarayon`),
           h('span', { class: 'dim' }, '✎')))))));
   }
-
-  if (!d.rows.length) el.append(h('div', { class: 'card' },
-    emptyBox('▦', 'Bu loyihada hali sanasi belgilangan ish yoʻq')));
 }
 
 function editPhase(projectId, phase, done) {

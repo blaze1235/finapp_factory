@@ -10,7 +10,16 @@ function h(tag, props, ...kids) {
     if (k === 'class') el.className = v;
     else if (k === 'html') el.innerHTML = v;
     else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') {
+      // Object.assign silently drops CSS custom properties — `--c` set that
+      // way never lands, and anything depending on var(--c) renders as
+      // nothing at all, with no error. They need setProperty.
+      for (const [prop, val] of Object.entries(v)) {
+        if (val == null) continue;
+        if (prop.startsWith('--')) el.style.setProperty(prop, String(val));
+        else el.style[prop] = val;
+      }
+    }
     else el.setAttribute(k, v === true ? '' : v);
   }
   const add = k => {

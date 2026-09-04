@@ -174,9 +174,9 @@ function tabDeliverables(page, d) {
   }
 }
 
-// The client's timeline is the same grid the team sees, built from the
-// client-safe views — so it carries the padded dates and no internal ones,
-// and the two sides are looking at one picture rather than two.
+// The client gets the roadmap, not the operating grid — it is the view meant
+// to be looked at rather than worked out of, and it is built from the same
+// client-safe data, so the two sides are reading one plan.
 async function tabTimeline(page, d) {
   const box = h('div', { class: 'card' }, h('div', { class: 'spin' }));
   page.append(box);
@@ -184,40 +184,38 @@ async function tabTimeline(page, d) {
   try { g = await GET('/api/portal/gantt'); }
   catch (e) { return clear(box).append(h('div', { class: 'err' }, e.message)); }
 
-  if (!g.rows_by_project) {
-    // Group per project so a client with two live projects gets two charts
-    // rather than one chart with two unrelated halves.
-    g.rows_by_project = {};
-    for (const t of g.tasks) (g.rows_by_project[t.project_id] ||= []).push(t);
-  }
-  clear(box);
+  const byProject = {};
+  for (const t of g.tasks) (byProject[t.project_id] ||= []).push(t);
+
   const wrap = h('div', {});
   box.replaceWith(wrap);
+  const scale = P.tlScale || 'week';
+
+  wrap.append(h('div', { class: 'row', style: { marginBottom: '12px' } },
+    h('div', { class: 'seg' },
+      h('button', { class: scale === 'week' ? 'on' : '', onclick: () => { P.tlScale = 'week'; render(); } }, rw().scale.week),
+      h('button', { class: scale === 'month' ? 'on' : '', onclick: () => { P.tlScale = 'month'; render(); } }, rw().scale.month))));
 
   for (const p of g.projects) {
-    const rows = (g.rows_by_project[p.id] || []).map(t => ({
+    const rows = (byProject[p.id] || []).map(t => ({
       id: t.id, title: t.title, phase_id: t.phase_id, state: t.state,
       span: t.starts || t.due ? { from: t.starts || t.due, to: t.due || t.starts } : null,
     }));
-    wrap.append(h('div', { class: 'card', style: { marginBottom: '14px' } },
-      h('b', p.name),
-      h('div', { style: { marginTop: '12px' } }, renderGantt({
-        columns: g.columns, today: g.today, rows,
+    if (!rows.some(r => r.span)) continue;
+    wrap.append(h('div', { style: { marginBottom: '20px' } },
+      h('div', { style: { fontFamily: 'var(--display)', fontSize: '15px', fontWeight: 600,
+                          letterSpacing: '-.02em', marginBottom: '10px' } }, p.name),
+      renderRoadmap({
+        rows, today: g.today,
         phases: g.phases.filter(ph => ph.project_id === p.id),
       }, {
-        compact: true,
-        statusColumn: true,
-        hideEmptyStages: true,
+        scale, colorBy: 'stage',
         onRow: r => openDeliverable(r.id),
-        processLabel: tl('deliverables'),
-        statusLabel: 'Holat',
         unphasedLabel: '—',
-        emptyStageText: '—',
-        emptyText: 'Muddatlar hali belgilanmagan',
         footnote: 'Sanalar sizning qaror qabul qilish vaqtingizni oʻz ichiga olmaydi.',
-      }))));
+      })));
   }
-  if (!g.projects.length) wrap.append(h('div', { class: 'card' },
+  if (!wrap.querySelector('.rm')) wrap.append(h('div', { class: 'card' },
     h('div', { class: 'empty' }, 'Muddatlar hali belgilanmagan')));
 }
 

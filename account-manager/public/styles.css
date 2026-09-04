@@ -23,7 +23,21 @@
   --shadow:    0 1px 2px rgba(28,25,23,.05), 0 4px 16px rgba(28,25,23,.06);
   --shadow-lg: 0 8px 40px rgba(28,25,23,.16);
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  /* Golos Text and Unbounded both carry full Cyrillic, which is not optional
+     here — the same screens ship in Latin Uzbek, Cyrillic Russian and English,
+     and a face that drops out on one of them looks broken in that language. */
+  --sans: "Golos Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --display: "Unbounded", "Golos Text", -apple-system, system-ui, sans-serif;
+
+  /* Stage colours. Warm and Central Asian rather than SaaS blue — terracotta,
+     saffron, pistachio, indigo, plum, clay. Chosen to stay distinguishable
+     when three of them sit next to each other on one screen. */
+  --st-1: #C2410C;
+  --st-2: #A16207;
+  --st-3: #15803D;
+  --st-4: #1E40AF;
+  --st-5: #86198F;
+  --st-6: #BE123C;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -35,6 +49,16 @@
     --info: #93c5fd; --info-bg: #172554;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.3);
     --shadow-lg: 0 8px 40px rgba(0,0,0,.5);
+
+    /* Lighter stage colours on dark: a tinted-and-outlined "planned" pill
+       draws its label in the stage colour, and the daylight indigo is
+       unreadable against a dark surface. */
+    --st-1: #F97316;
+    --st-2: #EAB308;
+    --st-3: #4ADE80;
+    --st-4: #7DA3FF;
+    --st-5: #E879F9;
+    --st-6: #FB7185;
   }
 }
 
@@ -57,7 +81,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
 .brand { padding: 0 10px 18px; display: flex; align-items: center; gap: 9px; }
-.brand b { font-size: 15px; letter-spacing: -.01em; }
+.brand b { font-family: var(--display); font-size: 13.5px; font-weight: 600; letter-spacing: -.02em; }
 .brand small { display: block; color: var(--ink-3); font-size: 11px; font-weight: 500; }
 .mark {
   width: 26px; height: 26px; border-radius: 7px; flex: none;
@@ -80,7 +104,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .main { padding: 26px 30px 60px; max-width: 1180px; }
 .head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 22px; }
-.head h1 { font-size: 22px; font-weight: 650; letter-spacing: -.02em; }
+.head h1 { font-family: var(--display); font-size: 21px; font-weight: 600; letter-spacing: -.03em; }
 .head p { color: var(--ink-2); margin-top: 3px; }
 .head .sp { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
@@ -226,7 +250,7 @@ label.f .hint { font-weight: 400; color: var(--ink-3); }
 .login { display: grid; place-items: center; min-height: 100vh; padding: 20px; }
 .login .box { width: 100%; max-width: 348px; }
 .login .mark { width: 42px; height: 42px; border-radius: 11px; font-size: 17px; margin: 0 auto 16px; }
-.login h1 { font-size: 20px; font-weight: 650; text-align: center; letter-spacing: -.02em; }
+.login h1 { font-family: var(--display); font-size: 19px; font-weight: 600; text-align: center; letter-spacing: -.03em; }
 .login .sub { text-align: center; color: var(--ink-2); margin: 5px 0 22px; }
 
 .err { background: var(--warn-bg); color: var(--warn); padding: 9px 12px; border-radius: 7px; font-size: 13px; margin-bottom: 12px; }
@@ -489,3 +513,165 @@ table.tbl tr:last-child td { border-bottom: none; }
   .gz { max-height: 68vh; }
   .gz-note { margin-left: 0; }
 }
+
+/* ---------- the roadmap ----------
+   An editorial planning poster, not a spreadsheet. Continuous time, chunky
+   pills, labels inside, and enough air that a client can read it across a
+   meeting-room table. The dense day grid above is the operating view; this is
+   the one you present. */
+.rm { --rm-paper: #fdfcfb; }
+@media (prefers-color-scheme: dark) { .rm { --rm-paper: #211e1d; } }
+
+.rm-scroll {
+  position: relative; overflow: auto;
+  /* Bounded, so the week axis stays overhead on a long plan instead of
+     scrolling off the top of the page — the same lesson as the day grid. */
+  max-height: min(70vh, 760px);
+  background: var(--rm-paper);
+  border: 1px solid var(--line); border-radius: 14px;
+  /* A whisper of grain, so the surface reads as paper rather than as a div. */
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(120,113,108,.055) 1px, transparent 0);
+  background-size: 4px 4px;
+}
+
+.rm-axis {
+  position: sticky; top: 0; z-index: 5;
+  height: 44px; margin-bottom: 2px;
+  background: var(--rm-paper);
+  border-bottom: 1px solid var(--line-soft);
+}
+.rm-tick { position: absolute; top: 12px; padding-left: 9px; }
+.rm-axis::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
+.rm-tick-l {
+  display: block; font-family: var(--display); font-size: 10px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap;
+}
+.rm-tick-s {
+  display: block; font-size: 10px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums; margin-top: 2px; white-space: nowrap;
+}
+
+.rm-body { position: relative; padding-bottom: 14px; }
+.rm-rule {
+  position: absolute; top: 0; bottom: 0; width: 0;
+  border-left: 1px dashed var(--line); opacity: .8;
+}
+.rm-band { position: absolute; top: 0; bottom: 0; background: rgba(120,113,108,.035); }
+
+.rm-today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--st-6); opacity: .5; z-index: 4; }
+.rm-today-tag {
+  position: absolute; top: 4px; left: 5px; white-space: nowrap;
+  font-family: var(--display); font-size: 8.5px; font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: #fff; background: var(--st-6);
+  padding: 2px 6px; border-radius: 20px;
+}
+
+.rm-group { position: absolute; left: 0; }
+/* Sticky on the horizontal axis, so a stage never loses its name when the
+   plan is scrolled forward. width:fit-content keeps the sticky box from
+   covering the bars behind it. */
+.rm-stage {
+  position: sticky; left: 0; z-index: 3; width: fit-content;
+  display: flex; align-items: flex-end; gap: 9px; padding: 0 12px 9px 14px;
+}
+.rm-stage::before {
+  content: ''; position: absolute; inset: 0;
+  background: var(--rm-paper); z-index: -1;
+  -webkit-mask-image: linear-gradient(90deg, #000 78%, transparent);
+  mask-image: linear-gradient(90deg, #000 78%, transparent);
+}
+.rm-chip { width: 9px; height: 9px; border-radius: 3px; flex: none; margin-bottom: 3px; }
+.rm-stage-name {
+  font-family: var(--display); font-size: 11px; font-weight: 600;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--ink);
+}
+.rm-stage-meta { font-size: 10.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; margin-bottom: 1px; }
+
+.rm-lane { position: absolute; left: 0; }
+.rm-lane:hover { background: rgba(120,113,108,.045); }
+
+/* The pill. Label inside, colour from its stage, and — the point of the
+   reference designs — a shape substantial enough to read at a glance. */
+.rm-bar {
+  position: absolute; top: 6px; border: none; border-radius: 999px;
+  background: var(--c); cursor: pointer; padding: 0 14px;
+  display: flex; align-items: center; gap: 7px;
+  overflow: hidden; white-space: nowrap;
+  transform-origin: left center;
+  animation: rmIn .42s cubic-bezier(.2,.8,.25,1) backwards;
+  transition: transform .14s ease, box-shadow .14s ease, filter .14s ease;
+}
+@keyframes rmIn {
+  from { transform: scaleX(.02); opacity: 0; }
+  60%  { opacity: 1; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+.rm-bar:hover { transform: translateY(-1.5px); box-shadow: 0 6px 18px rgba(28,25,23,.18); filter: brightness(1.06); }
+.rm-bar:active { transform: translateY(0); }
+.rm-bar-l {
+  font-size: 11.5px; font-weight: 600; color: #fff; letter-spacing: .01em;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Status is treatment, so stage colour and progress can be read at once:
+   filled = done, filled with a live dot = in progress, tinted outline =
+   planned, hatched = written off. */
+.rm-bar.st-planned {
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c) 55%, transparent);
+}
+.rm-bar.st-planned .rm-bar-l { color: var(--c); }
+.rm-bar.st-missed {
+  background: repeating-linear-gradient(45deg,
+    color-mix(in srgb, var(--c) 22%, transparent) 0 6px, transparent 6px 12px);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c) 40%, transparent);
+}
+.rm-bar.st-missed .rm-bar-l { color: var(--ink-2); text-decoration: line-through; }
+.rm-live {
+  width: 7px; height: 7px; border-radius: 50%; background: #fff; flex: none;
+  margin-left: auto; animation: rmPulse 1.9s ease-in-out infinite;
+}
+@keyframes rmPulse { 0%,100% { opacity: .95; transform: scale(1); } 50% { opacity: .45; transform: scale(.78); } }
+
+.rm-out {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  font-size: 11px; font-weight: 600; white-space: nowrap; pointer-events: none;
+}
+
+/* A presentation is a moment, not a duration. */
+.rm-mark {
+  position: absolute; top: 6px; height: 30px; border: none; background: none;
+  cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 0;
+  animation: rmIn .42s cubic-bezier(.2,.8,.25,1) backwards;
+}
+.rm-diamond {
+  width: 15px; height: 15px; flex: none; background: var(--st-6);
+  transform: rotate(45deg); border-radius: 3px;
+  box-shadow: 0 0 0 3px var(--rm-paper), 0 2px 8px rgba(190,18,60,.35);
+}
+.rm-mark:hover .rm-diamond { filter: brightness(1.12); }
+.rm-mark-l {
+  font-size: 11px; font-weight: 600; color: var(--st-6); white-space: nowrap;
+  padding-left: 3px;
+}
+
+.rm-ghost {
+  position: absolute; top: 11px; height: 20px; border-radius: 999px;
+  border: 1.5px dashed; opacity: .4;
+}
+
+.rm-legend {
+  display: flex; align-items: center; gap: 15px; flex-wrap: wrap;
+  padding: 13px 2px 0; font-size: 11.5px; color: var(--ink-2);
+}
+.rm-leg { display: inline-flex; align-items: center; gap: 6px; }
+.rm-leg i { width: 13px; height: 13px; border-radius: 4px; display: inline-block; }
+.rm-note { margin-left: auto; font-size: 11px; color: var(--ink-3); font-style: italic; max-width: 42ch; }
+.rm-blank { padding: 46px; text-align: center; color: var(--ink-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rm-bar, .rm-mark { animation: none; }
+  .rm-live { animation: none; }
+}
+@media (max-width: 860px) { .rm-note { margin-left: 0; } }
