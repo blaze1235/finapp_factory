@@ -86,9 +86,8 @@ invoices are migrated into transactions on deploy, then the old tables dropped.
 
 Also new: a fifth permission level (**Editor** — assigns work, no finance),
 My tasks, Calendar/Timeline with owner-editable phases, client contacts,
-join links that let an invitee set their own PIN, Documents for clients,
-a Settings page, and weekly progress snapshots so the report can show where
-each project stood on Monday against where it stands now.
+Documents for clients, a Settings page, and weekly progress snapshots so the
+report can show where each project stood on Monday against where it stands now.
 
 ## The timeline (§6, revised)
 
@@ -160,6 +159,31 @@ revision counter, a task's difficulty, or write work off as missed — the last
 two because they decide points.
 
 The owner account is created at provisioning and there is no invite path to it.
+
+## Access is granted, never requested (§ revised)
+
+There is no self-signup anywhere in this app, for any role — no join link, no
+"pick your own PIN" page. The owner is the only account that can ever sign
+itself in. Every other login, including a client's own, is created directly by
+the owner: `POST /api/team` takes that person's name, phone, PIN and — right
+there, optionally — their numeric **Telegram ID**, and the login works from
+that moment. `editPerson()` in `public/app.js` is the one form this runs
+through everywhere: the Team page's "+ Xodim", and the Clients page's
+"+ Kirish yaratish" opens the same form pre-locked to `role: client` and one
+company, so granting a client access is never a hunt through the full roster.
+
+**Why a Telegram ID typed in up front, rather than a self-bind code:** for a
+private chat, Telegram's `chat_id` *is* the person's numeric user ID — so an
+owner who already has that number (from `@userinfobot`, or just asking) is
+granting working notifications immediately, no extra step. What this cannot
+do is make Telegram deliver to someone who has never opened the bot: a bot can
+only message a chat that has messaged it first, which Telegram enforces
+platform-side and no amount of having the right ID gets around. The form says
+so; a failed send is logged, not thrown.
+
+The raw Telegram ID is never sent back to the browser once saved — the edit
+form shows only "✓ ulangan" (linked) with a one-click unlink, the same pattern
+the PIN field already used ("leave blank to keep the current one").
 
 A per-resource view/edit/approve/manage matrix was deliberately deferred: at
 6–8 people every cell resolves the same way, and an unused matrix is just a way

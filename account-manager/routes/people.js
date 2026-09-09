@@ -3,9 +3,12 @@
 // Users live in the control database, so anything joining a person to project
 // data does that join in JS — Postgres cannot do it across two databases.
 const express = require('express');
-const crypto = require('crypto');
 
 const WORK_MODES = ['office', 'remote', 'hybrid'];
+// Telegram user ids are numeric and currently 9-10 digits, but Telegram has
+// grown that number before — allow headroom rather than hardcode a width
+// that breaks the day they do it again.
+const TELEGRAM_ID_RE = /^\d{5,15}$/;
 // Stable per-person avatar colours, so the same initials are the same colour
 // on every card, row and avatar stack in the product.
 const AVATAR_COLORS = ['#b45309', '#1d4ed8', '#15803d', '#7c3aed', '#be123c', '#0f766e', '#a16207', '#4338ca'];
@@ -149,19 +152,34 @@ module.exports = ({ auth, only, wrap, controlPool, hashPin, normalisePhone, getT
       if (!found.length) return res.status(400).json({ error: 'No such client company' });
       companyId = found[0].id;
     }
+    // The whole point of this endpoint: the owner enters a person's Telegram
+    // ID directly, rather than that person self-binding through a link.
+    // Optional — a login works without it, just without Telegram until later.
+    let telegramChatId = null;
+    if (b.telegram_id !== undefined && b.telegram_id !== null && String(b.telegram_id).trim() !== '') {
+      const tid = String(b.telegram_id).trim();
+      if (!TELEGRAM_ID_RE.test(tid))
+        return res.status(400).json({ error: 'Telegram ID must be numbers only — find it via @userinfobot' });
+      telegramChatId = tid;
+    }
     try {
       const { rows } = await controlPool.query(
         `INSERT INTO users(tenant_id,name,phone,pin_hash,role,company_id,craft,title,
-                           responsibility,email,work_mode,birthdate)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'office'),$12)
-         RETURNING id,name,phone,role,company_id,craft,title,work_mode`,
+                           responsibility,email,work_mode,birthdate,telegram_chat_id)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'office'),$12,$13)
+         RETURNING id,name,phone,role,company_id,craft,title,work_mode,
+                   (telegram_chat_id IS NOT NULL) AS telegram_linked`,
         [req.user.tenant_id, b.name, normalisePhone(b.phone), hashPin(b.pin), b.role, companyId,
          b.craft || '', b.title || '', b.responsibility || '', b.email || '',
-         b.work_mode, b.birthdate || null]);
+         b.work_mode, b.birthdate || null, telegramChatId]);
       await controlPool.query('UPDATE users SET avatar_color=$1 WHERE id=$2',
         [pickColor(rows[0].id), rows[0].id]);
       res.json(rows[0]);
     } catch (e) {
+      // Two different unique columns can collide here; tell the owner which
+      // one, rather than a generic "already exists" that sends them hunting.
+      if (e.code === '23505' && e.constraint?.includes('telegram'))
+        return res.status(409).json({ error: 'That Telegram ID is already linked to someone else' });
       if (e.code === '23505') return res.status(409).json({ error: 'That phone number already has a login' });
       throw e;
     }
@@ -187,52 +205,34 @@ module.exports = ({ auth, only, wrap, controlPool, hashPin, normalisePhone, getT
       if (!/^\d{4,6}$/.test(String(req.body.pin))) return res.status(400).json({ error: 'PIN must be 4–6 digits' });
       sets.push(`pin_hash=$${sets.length + 1}`); vals.push(hashPin(req.body.pin));
     }
+    // A blank value clears it (unlinking Telegram); anything else must be a
+    // bare number — the owner correcting or adding an ID after the fact.
+    if ('telegram_id' in req.body) {
+      const raw = req.body.telegram_id;
+      if (raw === '' || raw === null || raw === undefined) {
+        sets.push(`telegram_chat_id=$${sets.length + 1}`); vals.push(null);
+      } else {
+        const tid = String(raw).trim();
+        if (!TELEGRAM_ID_RE.test(tid))
+          return res.status(400).json({ error: 'Telegram ID must be numbers only — find it via @userinfobot' });
+        sets.push(`telegram_chat_id=$${sets.length + 1}`); vals.push(tid);
+      }
+    }
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
     vals.push(id, req.user.tenant_id);
-    const { rows } = await controlPool.query(
-      `UPDATE users SET ${sets.join(',')} WHERE id=$${vals.length - 1} AND tenant_id=$${vals.length}
-       RETURNING id,name,phone,role,craft,title,responsibility,email,work_mode,birthdate,active`, vals);
-    res.json(rows[0]);
-  }));
-
-  // ---- join links ---------------------------------------------------------
-  // Adding a client mints a link rather than the owner inventing a PIN on
-  // someone else's behalf and sending it over Telegram. The invitee sets their
-  // own, so the agency never knows or transmits it.
-  r.post('/invites', only('owner'), wrap(async (req, res) => {
-    const b = req.body || {};
-    if (!['client', 'teammate', 'editor', 'accountant'].includes(b.role))
-      return res.status(400).json({ error: 'Unknown role for an invite' });
-    let companyId = null;
-    if (b.role === 'client') {
-      if (!b.company_id) return res.status(400).json({ error: 'Which client is this link for?' });
-      const found = await req.sql('SELECT id FROM companies WHERE id=$1', [Number(b.company_id)]);
-      if (!found.length) return res.status(400).json({ error: 'No such client company' });
-      companyId = found[0].id;
+    try {
+      const { rows } = await controlPool.query(
+        `UPDATE users SET ${sets.join(',')} WHERE id=$${vals.length - 1} AND tenant_id=$${vals.length}
+         RETURNING id,name,phone,role,craft,title,responsibility,email,work_mode,birthdate,active,
+                   (telegram_chat_id IS NOT NULL) AS telegram_linked`, vals);
+      res.json(rows[0]);
+    } catch (e) {
+      if (e.code === '23505' && e.constraint?.includes('telegram'))
+        return res.status(409).json({ error: 'That Telegram ID is already linked to someone else' });
+      throw e;
     }
-    const token = crypto.randomBytes(16).toString('base64url');
-    await controlPool.query(
-      `INSERT INTO invites(token,tenant_id,role,company_id,name,phone,craft,created_by,expires_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8, now() + interval '14 days')`,
-      [token, req.user.tenant_id, b.role, companyId, b.name || '', normalisePhone(b.phone || ''),
-       b.craft || '', req.user.id]);
-    const base = process.env.PUBLIC_URL || '';
-    res.json({ token, url: `${base}/join/${token}`, expires_in_days: 14 });
   }));
 
-  r.get('/invites', only('owner'), wrap(async (req, res) => {
-    const { rows } = await controlPool.query(
-      `SELECT token, role, company_id, name, phone, expires_at, used_at, created_at
-         FROM invites WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50`, [req.user.tenant_id]);
-    const base = process.env.PUBLIC_URL || '';
-    res.json(rows.map(i => ({ ...i, url: `${base}/join/${i.token}` })));
-  }));
-
-  r.delete('/invites/:token', only('owner'), wrap(async (req, res) => {
-    await controlPool.query('DELETE FROM invites WHERE token=$1 AND tenant_id=$2 AND used_at IS NULL',
-      [req.params.token, req.user.tenant_id]);
-    res.json({ ok: true });
-  }));
 
   return r;
 };

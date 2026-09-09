@@ -440,30 +440,79 @@ async function main() {
      (await call(designer, 'POST', `/api/projects/${proj.id}/schedule`,
        { tasks: [{ id: spanTask.id, due_date: '2026-09-01' }] })).status === 403);
 
-  section('Client contacts and join links (§7)');
+  section('Client contacts and direct access grants (§7)');
   const contact = await call(owner, 'POST', `/api/companies/${acme.id}/contacts`,
     { name: 'Second Person', position: 'Brand manager', email: 'x@acme.test', is_main: false });
   ok('several contacts can be recorded against one client', contact.status === 200);
   const companyDetail = await call(owner, 'GET', `/api/companies/${acme.id}`);
   ok('the client record carries its contacts', companyDetail.body.contacts.length >= 1);
 
-  const invite = await call(owner, 'POST', '/api/invites', { role: 'client', company_id: acme.id, name: 'Invited' });
-  ok('adding a client mints a join link', invite.status === 200 && !!invite.body.url);
-  const token = invite.body.token;
-  ok('the link describes itself before anyone signs up',
-     (await call(null, 'GET', `/api/invite/${token}`)).body.role === 'client');
-  const accepted = await call(null, 'POST', `/api/invite/${token}/accept`,
-    { name: 'Invited Person', phone: '+998900000009', pin: '4321' });
-  ok('the invitee sets their own PIN and is signed straight in',
-     accepted.status === 200 && !!accepted.body.token && accepted.body.role === 'client');
-  ok('the same link cannot be used twice',
-     (await call(null, 'POST', `/api/invite/${token}/accept`,
-       { name: 'Someone Else', phone: '+998900000010', pin: '5555' })).status === 410);
-  const invitedPortal = await call(accepted.body.token, 'GET', '/api/portal');
-  ok('the invited client lands scoped to their own company',
-     invitedPortal.status === 200 && invitedPortal.body.company.id === acme.id);
-  ok('a member cannot mint invite links',
-     (await call(designer, 'POST', '/api/invites', { role: 'teammate' })).status === 403);
+  // The self-serve invite-link flow is gone. Assert it stays gone: a route
+  // reappearing here later would be a silent reopening of public signup.
+  // Unmatched GETs fall through this app's own catch-all to the SPA shell
+  // (200, HTML) rather than a real 404 — checked here as "no JSON body" —
+  // while an unmatched POST gets Express's own 404, since there is no POST
+  // catch-all route.
+  const joinPage = await call(null, 'GET', '/join/x');
+  ok('the old join page is gone — falls through to the app shell, not real content',
+     joinPage.status === 200 && joinPage.body === null);
+  // Unlike /join/x, these ARE under /api — and every bare-mounted /api
+  // router requires a token before it even looks at its own paths (see
+  // routes/work.js), so an unmatched /api path with no token is 401, not a
+  // 404 that would hint at whether the route used to exist.
+  ok('the old invite-describe route answers with no token, not real data',
+     (await call(null, 'GET', '/api/invite/anything')).status === 401);
+  ok('the old invite-accept route is gone the same way',
+     (await call(null, 'POST', '/api/invite/anything/accept', {})).status === 401);
+  ok('POST /api/invites itself is gone', (await call(owner, 'POST', '/api/invites', {})).status === 404);
+
+  // Direct provisioning: the owner types the person's details, including —
+  // right here, at creation — their numeric Telegram ID. No link, no code,
+  // no self-signup.
+  const granted = await call(owner, 'POST', '/api/team', {
+    name: 'Invited Person', phone: '+998900000009', pin: '4321',
+    role: 'client', company_id: acme.id, telegram_id: '555000111' });
+  ok('the owner grants a client login directly, Telegram ID included',
+     granted.status === 200 && granted.body.telegram_linked === true);
+  const grantedLogin = await login('+998900000009', '4321');
+  const grantedPortal = await call(grantedLogin, 'GET', '/api/portal');
+  ok('that login works immediately and lands scoped to the right company',
+     grantedPortal.status === 200 && grantedPortal.body.company.id === acme.id);
+  ok('a member cannot grant access to anyone',
+     (await call(designer, 'POST', '/api/team', { name: 'X', phone: '+998900000099', pin: '1111', role: 'teammate' })).status === 403);
+
+  ok('a non-numeric Telegram ID is refused',
+     (await call(owner, 'POST', '/api/team',
+       { name: 'Bad TG', phone: '+998900000012', pin: '1111', role: 'teammate', telegram_id: 'abc123' })).status === 400);
+  const dupeTg = await call(owner, 'POST', '/api/team',
+    { name: 'Dupe TG', phone: '+998900000013', pin: '1111', role: 'teammate', telegram_id: '555000111' });
+  ok('a Telegram ID already in use by someone else is refused, distinctly from a phone clash',
+     dupeTg.status === 409 && /Telegram/.test(dupeTg.body.error), dupeTg.body.error);
+
+  // Adding, then removing, a Telegram ID on an existing person.
+  const bareTeammate = await call(owner, 'POST', '/api/team',
+    { name: 'Bare Teammate', phone: '+998900000014', pin: '1111', role: 'teammate' });
+  ok('a login can be created with no Telegram ID at all', bareTeammate.status === 200 && bareTeammate.body.telegram_linked === false);
+  const tgLinked = await call(owner, 'PATCH', `/api/team/${bareTeammate.body.id}`, { telegram_id: '555000222' });
+  ok('the owner can add a Telegram ID later', tgLinked.status === 200 && tgLinked.body.telegram_linked === true);
+  const tgUnlinked = await call(owner, 'PATCH', `/api/team/${bareTeammate.body.id}`, { telegram_id: '' });
+  ok('...and remove it again', tgUnlinked.status === 200 && tgUnlinked.body.telegram_linked === false);
+
+  // Regression: getTeam() used to omit half the profile columns it wrote,
+  // so the Team page rendered them blank. Locked in here.
+  const profiled = await call(owner, 'POST', '/api/team', {
+    name: 'Full Profile', phone: '+998900000015', pin: '1111', role: 'teammate',
+    title: 'Senior Designer', craft: 'motion', responsibility: 'Edits and sound',
+    email: 'full@studio.test', work_mode: 'remote', birthdate: '1994-03-02' });
+  const teamList = (await call(owner, 'GET', '/api/team')).body;
+  const profRow = teamList.find(u => u.id === profiled.body.id);
+  ok('every profile field written at creation comes back from GET /api/team',
+     profRow && profRow.title === 'Senior Designer' && profRow.craft === 'motion'
+     && profRow.responsibility === 'Edits and sound' && profRow.email === 'full@studio.test'
+     && profRow.work_mode === 'remote' && String(profRow.birthdate).slice(0, 10) === '1994-03-02',
+     JSON.stringify(profRow));
+  ok('a colleague sees no raw Telegram id, only whether one is linked',
+     !JSON.stringify(teamList).includes('555000111') && teamList.some(u => 'telegram_linked' in u));
 
   section('Settings (§12)');
   ok('a member cannot read settings', (await call(designer, 'GET', '/api/settings')).status === 403);

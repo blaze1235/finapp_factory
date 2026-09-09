@@ -1167,20 +1167,27 @@ async function openCompany(id) {
       : h('div', { class: 'dim tiny', style: { marginTop: '8px' } }, 'Kontakt qoʻshilmagan'));
     body.append(contacts);
 
-    // Logins, and the join link that creates them.
+    // Logins — granted directly by the owner, name/phone/PIN/Telegram ID all
+    // entered here. There is no link to send; the person can sign in the
+    // moment this form is saved.
+    const grant = () => editPerson(null, [{ id, name: c.name }], reload,
+      { role: 'client', company_id: id, lockRole: true, lockCompany: true });
     const logins = h('div', { class: 'card' },
       h('div', { class: 'row' }, h('h2', { style: { marginBottom: 0 } }, 'Platformaga kirish'),
         State.me.role === 'owner'
-          ? h('button', { class: 'btn sm pri sp', onclick: () => makeInvite(id, c.name) }, '🔗 Havola yaratish') : null));
+          ? h('button', { class: 'btn sm pri sp', onclick: grant }, '+ Kirish yaratish') : null));
     logins.append(d.logins.length
       ? h('div', { class: 'list', style: { marginTop: '8px' } }, ...d.logins.map(u =>
-          h('div', { class: 'item', style: { cursor: 'default' } },
+          h('div', { class: 'item', style: { cursor: State.me.role === 'owner' ? 'pointer' : 'default' },
+                    onclick: State.me.role === 'owner' ? () => editPerson(
+                      { ...u, role: 'client', telegram_linked: u.telegram }, [{ id, name: c.name }], reload,
+                      { role: 'client', company_id: id, lockRole: true, lockCompany: true }) : null },
             h('div', {}, h('div', { class: 't' }, u.name), h('div', { class: 's mono' }, u.phone)),
             h('div', { class: 'r' },
               u.telegram ? h('span', { class: 'pill ok' }, 'Telegram') : null,
               u.active ? null : h('span', { class: 'pill warn' }, 'Faol emas')))))
       : h('div', { class: 'dim tiny', style: { marginTop: '8px' } },
-          'Bu mijozda hali kirish huquqi yoʻq. Havola yarating — oʻzi PIN belgilaydi.'));
+          'Bu mijozda hali kirish huquqi yoʻq.'));
     body.append(logins);
 
     if (d.projects.length) body.append(h('div', { class: 'card' }, h('h2', 'Loyihalar'),
@@ -1258,28 +1265,6 @@ function editContact(companyId, contact, done) {
   });
 }
 
-// Adding a client mints a link; the invitee sets their own PIN, so the agency
-// never knows or transmits it.
-function makeInvite(companyId, companyName) {
-  modal('Kirish havolasi', close => {
-    const box = h('div', {}, h('div', { class: 'spin' }));
-    POST('/api/invites', { role: 'client', company_id: companyId }).then(inv => {
-      const url = inv.url || (location.origin + '/join/' + inv.token);
-      clear(box).append(
-        h('p', { class: 'muted' }, `${companyName} uchun havola. Yuboring — ular ismini va oʻz PIN kodini oʻzlari kiritadi.`),
-        h('div', { class: 'card mono', style: { wordBreak: 'break-all', fontSize: '12.5px', margin: '12px 0' } }, url),
-        h('div', { class: 'row', style: { gap: '8px' } },
-          h('button', {
-            class: 'btn pri', onclick: () => { navigator.clipboard?.writeText(url); toast('Nusxalandi'); },
-          }, 'Nusxalash'),
-          h('a', { class: 'btn', href: `https://t.me/share/url?url=${encodeURIComponent(url)}`, target: '_blank' },
-            'Telegramda yuborish')),
-        h('div', { class: 'tiny dim', style: { marginTop: '10px' } }, `${inv.expires_in_days} kun amal qiladi. Bir marta ishlatiladi.`));
-    }).catch(e => clear(box).append(h('div', { class: 'err' }, e.message)));
-    return box;
-  });
-}
-
 function newCompany(done) {
   modal('Yangi mijoz', close => {
     const f = h('form');
@@ -1307,8 +1292,10 @@ function newCompany(done) {
             try {
               const co = await POST('/api/companies', b);
               close(); toast('Qoʻshildi');
-              if (State.me.role === 'owner') makeInvite(co.id, co.name);
-              done && done();
+              if (State.me.role === 'owner')
+                editPerson(null, [{ id: co.id, name: co.name }], done,
+                  { role: 'client', company_id: co.id, lockRole: true, lockCompany: true });
+              else done && done();
             } catch (err) { toast(err.message, 'bad'); }
           },
         }, 'Qoʻshish')));
@@ -1346,7 +1333,8 @@ async function viewTeam(el) {
     h('td', { class: 'tiny' }, u.title || u.craft || '—'),
     h('td', { class: 'tiny dim' }, u.responsibility || '—'),
     h('td', { class: 'tiny' },
-      h('div', { class: 'mono' }, u.phone || ''),
+      h('div', { class: 'row', style: { gap: '5px' } }, h('span', { class: 'mono' }, u.phone || ''),
+        u.telegram_linked ? h('span', { title: 'Telegram ulangan' }, '💬') : null),
       h('div', { class: 'dim' }, u.email || '')),
     h('td', { class: 'tiny' }, WORK_MODE[u.work_mode] || u.work_mode || '—'),
     h('td', h('span', { class: 'pill' }, u.role_name)),
@@ -1369,13 +1357,29 @@ async function viewTeam(el) {
     'Akkaunt menejer hisobi qoʻlda yaratiladi va bu yerdan taklif qilinmaydi.')));
 }
 
-function editPerson(user, companies, done) {
-  modal(user ? user.name : 'Yangi xodim', close => {
+// The one form that grants access to anyone who isn't the owner — a
+// teammate, an accountant, or a client's own login. There is no other way
+// in: no self-signup, no link anyone can forward. The owner types the
+// person's name, phone, role and (optionally, right here) their numeric
+// Telegram ID, and that person can sign in from that moment.
+//
+// `presets` lets a caller open this pre-aimed at one outcome — e.g. the
+// Clients page opens it locked to role=client and one company, so granting
+// a client's login never means hunting them out of a full team roster.
+function editPerson(user, companies, done, presets = {}) {
+  const isClient = presets.role === 'client';
+  modal(user ? user.name : (isClient ? 'Mijoz uchun kirish' : 'Yangi xodim'), close => {
     const f = h('form');
-    const role = h('select', { class: 'in' }, ...LEVELS.filter(l => l[0] !== 'owner')
-      .map(([k, n]) => h('option', { value: k, selected: user?.role === k }, n)));
-    const company = h('select', { class: 'in' }, ...companies.map(c => h('option', { value: c.id }, c.name)));
-    const companyWrap = h('label', { class: 'f', style: { display: 'none' } }, h('span', 'Qaysi mijoz'), company);
+    const role = h('select', {
+      class: 'in', disabled: presets.lockRole || undefined,
+    }, ...LEVELS.filter(l => l[0] !== 'owner')
+      .map(([k, n]) => h('option', { value: k, selected: (user?.role || presets.role) === k }, n)));
+    const company = h('select', {
+      class: 'in', disabled: presets.lockCompany || undefined,
+    }, ...companies.map(c => h('option', { value: c.id, selected: c.id === presets.company_id }, c.name)));
+    const companyWrap = h('label', {
+      class: 'f', style: { display: (user?.role || presets.role) === 'client' ? 'block' : 'none' },
+    }, h('span', 'Qaysi mijoz'), company);
     const workMode = h('select', { class: 'in' }, ...Object.entries(WORK_MODE)
       .map(([k, n]) => h('option', { value: k, selected: (user?.work_mode || 'office') === k }, n)));
     const fields = {};
@@ -1383,22 +1387,52 @@ function editPerson(user, companies, done) {
       fields[k] = h('input', { class: 'in', value: user?.[k] || '', ...opts });
       return h('label', { class: 'f' }, h('span', label), fields[k]);
     };
-    role.onchange = () => { companyWrap.style.display = role.value === 'client' ? 'block' : 'none'; };
+    if (!presets.lockRole) role.onchange = () => { companyWrap.style.display = role.value === 'client' ? 'block' : 'none'; };
 
-    f.append(
-      field('name', 'Ism'),
-      h('div', { class: 'grid g2' }, field('title', 'Lavozim'), field('craft', 'Yoʻnalish')),
-      field('responsibility', 'Masʼuliyat', { placeholder: 'Nima uchun javob beradi' }),
+    const roleField = presets.lockRole
+      ? null   // the Clients page already says "mijoz uchun kirish" in the title — no need to repeat it as a disabled dropdown
+      : h('label', { class: 'f' }, h('span', 'Ruxsat darajasi'), role);
+
+    // Telegram: a plain number, entered once, and never shown back — same
+    // pattern as the PIN field below. What IS shown is whether one is
+    // already on file, and a one-click way to remove it.
+    fields.telegram_id = h('input', { class: 'in mono', inputmode: 'numeric', placeholder: user?.telegram_linked ? '••••••••' : '123456789' });
+    const tgStatus = user?.telegram_linked
+      ? h('div', { class: 'row', style: { gap: '8px', marginTop: '5px' } },
+          h('span', { class: 'pill ok' }, '✓ ulangan'),
+          h('a', {
+            href: '#', class: 'tiny', onclick: async e => {
+              e.preventDefault();
+              await PATCH(`/api/team/${user.id}`, { telegram_id: '' });
+              toast('Telegram uzildi'); close(); done();
+            },
+          }, 'uzish'))
+      : null;
+
+    // Native Element.append() — unlike this file's own h() helper — does NOT
+    // skip null children; it stringifies one into the literal text "null" on
+    // the page. Building the list and filtering before appending is what h()
+    // does internally, so it has to happen by hand here too.
+    f.append(...[
+      isClient ? null : field('title', 'Lavozim'),
+      isClient ? null : field('craft', 'Yoʻnalish'),
+      isClient ? null : field('responsibility', 'Masʼuliyat', { placeholder: 'Nima uchun javob beradi' }),
       h('div', { class: 'grid g2' },
-        field('phone', 'Telefon', { type: 'tel', disabled: !!user }),
-        field('email', 'Email', { type: 'email' })),
-      h('div', { class: 'grid g2' },
+        field('name', 'Ism'),
+        field('phone', 'Telefon', { type: 'tel', disabled: !!user })),
+      h('label', { class: 'f' },
+        h('span', 'Telegram ID ', h('span', { class: 'hint' }, '— @userinfobot orqali topiladi, ixtiyoriy')),
+        fields.telegram_id, tgStatus,
+        h('div', { class: 'tiny dim', style: { marginTop: '4px' } },
+          'Odam botga /start bosmaguncha xabarlar yetib bormaydi, ID toʻgʻri boʻlsa ham.')),
+      isClient ? null : field('email', 'Email', { type: 'email' }),
+      isClient ? null : h('div', { class: 'grid g2' },
         h('label', { class: 'f' }, h('span', 'Ish rejimi'), workMode),
         field('birthdate', 'Tugʻilgan kun', { type: 'date' })),
-      h('label', { class: 'f' }, h('span', 'Ruxsat darajasi'), role),
+      roleField,
       companyWrap,
       h('label', { class: 'f' }, h('span', user ? 'Yangi PIN ' : 'PIN ',
-        h('span', { class: 'hint' }, user ? '— boʻsh qoldirsangiz oʻzgarmaydi' : '— 4 raqam')),
+        h('span', { class: 'hint' }, user ? '— boʻsh qoldirsangiz oʻzgarmaydi' : '— 4 raqam, oʻzingiz belgilaysiz')),
         (fields.pin = h('input', { class: 'in mono', inputmode: 'numeric', placeholder: '••••' }))),
       h('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '8px', marginTop: '10px' } },
         user ? h('button', {
@@ -1409,18 +1443,24 @@ function editPerson(user, companies, done) {
           },
         }, user.active ? 'Faolsizlantirish' : 'Faollashtirish') : null,
         h('button', { class: 'btn', type: 'button', onclick: close }, t('cancel')),
-        h('button', { class: 'btn pri', type: 'button', onclick: save }, t('save'))));
+        h('button', { class: 'btn pri', type: 'button', onclick: save }, t('save'))),
+    ].filter(x => x != null));
 
     async function save() {
       const body = {
-        name: fields.name.value, title: fields.title.value, craft: fields.craft.value,
-        responsibility: fields.responsibility.value, email: fields.email.value,
-        work_mode: workMode.value, birthdate: fields.birthdate.value || null,
+        name: fields.name.value, title: fields.title?.value || '', craft: fields.craft?.value || '',
+        responsibility: fields.responsibility?.value || '', email: fields.email?.value || '',
+        work_mode: workMode.value, birthdate: fields.birthdate?.value || null,
       };
       if (fields.pin.value) body.pin = fields.pin.value;
+      // Blank means "leave it alone" on an existing person (they may already
+      // have one on file); on a brand-new one, blank just means "no Telegram
+      // yet" rather than "remove it".
+      if (fields.telegram_id.value.trim() || !user) body.telegram_id = fields.telegram_id.value.trim();
       try {
         if (user) { await PATCH(`/api/team/${user.id}`, { ...body, role: role.value }); }
         else {
+          if (!fields.name.value) return toast('Ismni yozing', 'bad');
           if (!fields.phone.value) return toast('Telefon raqamini kiriting', 'bad');
           if (!fields.pin.value) return toast('PIN kiriting', 'bad');
           await POST('/api/team', { ...body, phone: fields.phone.value, pin: fields.pin.value,

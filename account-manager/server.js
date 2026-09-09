@@ -95,7 +95,6 @@ app.post('/api/admin/tenants/:id/mark-paid', platformAdmin, wrap(async (req, res
 // the client portal ships none of the internal code at all.
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/portal*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'portal', 'index.html')));
-app.get('/join/*',  (req, res) => res.sendFile(path.join(__dirname, 'public', 'join', 'index.html')));
 app.get('/tg*',     (req, res) => res.sendFile(path.join(__dirname, 'public', 'tg', 'index.html')));
 app.get('*',        (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

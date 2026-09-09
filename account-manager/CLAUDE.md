@@ -23,7 +23,7 @@ that will tell you that you got it wrong.
 
 CI runs the same suite on every push and pull request.
 
-## The five things that break silently
+## The six things that break silently
 
 ### 1. RLS only applies because the app drops privileges
 
@@ -60,7 +60,17 @@ Ordering is load-bearing and has broken twice:
 shape changes, `DROP VIEW` first. The file must apply cleanly **three times in a
 row** on a fresh database and as an upgrade to an existing one.
 
-### 4. Three decisions REVERSE the original brief
+### 4. There is no self-signup, for anyone, ever
+
+The owner is the only account that signs itself in. Every other login —
+teammate, accountant, editor, or a client's own portal access — is created
+directly by the owner through `POST /api/team`, PIN and (optionally) Telegram
+ID included. A prior version of this app had a public join-link flow where the
+invitee picked their own PIN; it is gone, on purpose, and should not come back
+without being asked for. See "Access is granted, never requested" in the
+README.
+
+### 5. Three decisions REVERSE the original brief
 
 They are marked `REVERSAL` in `lib/schema.sql`. They look like bugs if you only
 read the first brief. Do not "fix" them:
@@ -71,7 +81,7 @@ read the first brief. Do not "fix" them:
   this; the client asked for it in writing.
 - **Six named pipeline stages**, not five.
 
-### 5. There are no invoices
+### 6. There are no invoices
 
 `invoices` / `invoice_lines` / `payments` were migrated into `transactions` and
 dropped. An income row with `settled = false` **is** "unpaid to us": it lifts
@@ -98,6 +108,19 @@ alongside the ledger.
 - Session tokens are **header-only**. Downloads use a separate five-minute,
   single-file token; putting the session token in a URL leaks it into logs,
   history, and the `Referer` of the redirect out to Drive.
+- Native `Element.append(a, b, null, c)` does **not** skip `null` the way this
+  file's own `h()` helper does — it calls `String(null)` and inserts the
+  literal text "null" onto the page, silently, no error. `h()`'s internal
+  `add()` filters falsy children; a raw `.append(...)` call with a conditional
+  in it does not, and needs `[...].filter(x => x != null)` by hand
+  (`editPerson()` in `public/app.js` is the example to copy).
+- `lib/team.js`'s `getTeam()` is the one place a person's row is assembled for
+  the rest of the app. If a column exists on `users` but a caller reads
+  `undefined` for it, check this `SELECT` first — it has silently omitted a
+  whole batch of profile columns before (title, responsibility, email,
+  work_mode, birthdate, avatar_color all went missing for a full release), and
+  nothing broke loudly. It's a plain function call, not RLS, so nothing
+  enforces its shape but the tests.
 
 ## Layout
 
@@ -107,7 +130,7 @@ lib/rls.js            the only sanctioned way to touch a tenant database
 lib/telegram.js       bot, Mini App auth, outbound
 routes/               portal (clients) is mounted BEFORE the staff routers,
                       because those apply a staff-only gate to all of /api
-public/               agency app · portal/ · tg/ · join/
+public/               agency app · portal/ · tg/
 public/gantt.js       the dense weekday operating grid
 public/roadmap.js     the presentation timeline (continuous time)
 scripts/flow-test.js  158 checks over real HTTP

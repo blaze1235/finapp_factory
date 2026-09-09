@@ -63,6 +63,15 @@ CREATE TABLE IF NOT EXISTS users (
   -- A fixed colour per person, so the same initials are the same colour on
   -- every card, row and avatar stack in the product.
   avatar_color TEXT DEFAULT '',
+  -- Set directly by the owner at creation (or added later), not through any
+  -- self-bind flow. For a private chat, Telegram's chat_id IS the person's
+  -- numeric user id, so an owner who already knows that number is granting
+  -- working notifications immediately — no code, no link. The one thing this
+  -- cannot do is make Telegram deliver to someone who has never opened the
+  -- bot: a bot can only message a chat_id that has messaged it first, which
+  -- Telegram enforces platform-side and this app cannot route around. If the
+  -- person has not pressed /start yet, notifications queue up as failures
+  -- (logged, not thrown) until they do — see lib/telegram.js.
   telegram_chat_id BIGINT UNIQUE,
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -99,22 +108,17 @@ CREATE TABLE IF NOT EXISTS pending_actions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Adding a client mints a join link rather than the owner inventing a PIN for
--- someone else and sending it over Telegram. The invitee sets their own.
-CREATE TABLE IF NOT EXISTS invites (
-  token TEXT PRIMARY KEY,
-  tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  role TEXT NOT NULL REFERENCES roles(key),
-  company_id INTEGER,          -- clients only: companies.id in the tenant database
-  name TEXT DEFAULT '',
-  phone TEXT DEFAULT '',
-  craft TEXT DEFAULT '',
-  created_by INTEGER,
-  expires_at TIMESTAMPTZ NOT NULL,
-  used_at TIMESTAMPTZ,
-  created_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- REVISION: self-serve join links (where the invitee picked their own PIN)
+-- are gone. Access is granted the other way now — the owner is the only
+-- account that can ever sign in on its own, and every other login is created
+-- BY the owner, by hand, with that person's name, phone and Telegram ID
+-- already known. There is no public entry point into a fresh agency.
+--
+-- The 'invites' table this replaced is dropped outright rather than left
+-- unused: no real agency had onboarded a client through it yet, so there is
+-- nothing to migrate, and a dead table with a live-looking API is worse than
+-- no table.
+DROP TABLE IF EXISTS invites CASCADE;
 
 CREATE TABLE IF NOT EXISTS link_codes (
   code TEXT PRIMARY KEY,

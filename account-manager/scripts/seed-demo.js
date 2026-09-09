@@ -32,16 +32,19 @@ async function main() {
     name: 'Studio Nur', code: CODE,
     ownerName: 'Dilnoza Karimova', ownerPhone: '+998901112233', ownerPin: '1234',
   });
+  // The owner account itself is created outside addUser (provisionTenant does
+  // it), so its demo Telegram ID is set separately here.
+  await controlPool.query('UPDATE users SET telegram_chat_id=$1 WHERE id=$2', ['100000001', ownerId]);
 
   const { pickColor } = require('../routes/people');
   const addUser = async (name, phone, role, opts = {}) => {
     const id = (await controlPool.query(
       `INSERT INTO users(tenant_id,name,phone,pin_hash,role,company_id,craft,title,
-                         responsibility,email,work_mode,birthdate)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'office'),$12) RETURNING id`,
+                         responsibility,email,work_mode,birthdate,telegram_chat_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'office'),$12,$13) RETURNING id`,
       [tenant.id, name, phone, hashPin(opts.pin || '1234'), role, opts.companyId || null,
        opts.craft || '', opts.title || '', opts.responsibility || '', opts.email || '',
-       opts.workMode, opts.birthdate || null])).rows[0].id;
+       opts.workMode, opts.birthdate || null, opts.telegramId || null])).rows[0].id;
     await controlPool.query('UPDATE users SET avatar_color=$1 WHERE id=$2', [pickColor(id), id]);
     return id;
   };
@@ -241,7 +244,8 @@ async function main() {
 
   // The client's own decisions, made as the client, so the trigger chain runs
   // exactly as it will in production rather than being faked into the tables.
-  const clientAziz = await addUser('Aziz Umarov', '+998935550101', 'client', { companyId: ids.osiyo, pin: '1111' });
+  const clientAziz = await addUser('Aziz Umarov', '+998935550101', 'client',
+    { companyId: ids.osiyo, pin: '1111', telegramId: '100000002' });
   const clientKamola = await addUser('Kamola Rashidova', '+998935550102', 'client', { companyId: ids.silk, pin: '2222' });
   const { withRls } = require('../lib/rls');
   const asAziz = fn => withRls(pool, { userId: clientAziz, role: 'client', companyId: ids.osiyo }, fn);
