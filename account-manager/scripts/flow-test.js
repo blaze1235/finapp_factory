@@ -378,6 +378,10 @@ async function main() {
   ok('the owner can add a phase', phase.status === 200);
   ok('a member cannot add a phase',
      (await call(designer, 'POST', `/api/calendar/projects/${proj.id}/phases`, { name: 'Nope' })).status === 403);
+  // Same class of bug as `active: false` above, in the sibling PATCH.
+  const zeroed = await call(owner, 'PATCH', `/api/calendar/phases/${phase.body.id}`, { position: 0 });
+  ok('a phase can be moved to position 0 — the first slot, not "unset"',
+     zeroed.status === 200 && zeroed.body.position === 0, JSON.stringify(zeroed));
   const cal = await call(designer, 'GET', '/api/calendar');
   ok('the team sees the all-projects timeline', cal.status === 200 && cal.body.length >= 1);
   ok('a client sees their phases through the portal',
@@ -513,6 +517,17 @@ async function main() {
      JSON.stringify(profRow));
   ok('a colleague sees no raw Telegram id, only whether one is linked',
      !JSON.stringify(teamList).includes('555000111') && teamList.some(u => 'telegram_linked' in u));
+
+  // Regression: `req.body[k] || null` treated a deliberate `false` the same
+  // as an absent value, so deactivating anyone (active: false) failed a NOT
+  // NULL constraint outright. Found live, on production, doing routine
+  // cleanup — which is exactly the kind of thing this suite exists to catch
+  // before it reaches there again.
+  const deactivated = await call(owner, 'PATCH', `/api/team/${profiled.body.id}`, { active: false });
+  ok('deactivating someone (active: false) actually works',
+     deactivated.status === 200 && deactivated.body.active === false, JSON.stringify(deactivated));
+  const reactivated = await call(owner, 'PATCH', `/api/team/${profiled.body.id}`, { active: true });
+  ok('...and reactivating them works the same way', reactivated.body.active === true);
 
   section('Settings (§12)');
   ok('a member cannot read settings', (await call(designer, 'GET', '/api/settings')).status === 403);

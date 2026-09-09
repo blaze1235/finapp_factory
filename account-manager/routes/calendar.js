@@ -163,8 +163,11 @@ module.exports = ({ auth, only, wrap, getNameMap, readSettings }) => {
 
   r.patch('/phases/:id', only('owner'), wrap(async (req, res) => {
     const sets = [], vals = [];
+    // Same fix as the team PATCH: `|| null` would turn a legitimate
+    // `position: 0` (the first phase) into null. Only an empty string —
+    // what a blanked date input sends — should become null.
     for (const k of ['name', 'starts_on', 'ends_on', 'position'])
-      if (k in req.body) { sets.push(`${k}=$${sets.length + 1}`); vals.push(req.body[k] || null); }
+      if (k in req.body) { sets.push(`${k}=$${sets.length + 1}`); vals.push(req.body[k] === '' ? null : req.body[k]); }
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
     vals.push(Number(req.params.id));
     const rows = await req.sql(`UPDATE project_phases SET ${sets.join(',')} WHERE id=$${vals.length} RETURNING *`, vals);

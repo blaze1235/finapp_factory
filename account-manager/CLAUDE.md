@@ -141,6 +141,17 @@ alongside the ledger.
   work_mode, birthdate, avatar_color all went missing for a full release), and
   nothing broke loudly. It's a plain function call, not RLS, so nothing
   enforces its shape but the tests.
+- `req.body[k] || null` in a generic PATCH loop is **not the same** as "empty
+  string becomes null". `||` treats `false` and `0` as absent too — so a
+  boolean column (`active`) or a legitimate `0` (a phase's `position`, the
+  first slot) silently became `null` and then failed that column's NOT NULL
+  constraint outright. This one shipped and sat there — the
+  "Faolsizlantirish" (deactivate) button had never worked in production until
+  it was caught doing routine account cleanup. The fix is
+  `req.body[k] === '' ? null : req.body[k]` — coerce only what a blanked date
+  input actually sends, nothing else. `routes/work.js`'s `/schedule` endpoint
+  already used the correct form; the older PATCH handlers in
+  `routes/people.js` and `routes/calendar.js` did not.
 
 ## Layout
 

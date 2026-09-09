@@ -193,9 +193,15 @@ module.exports = ({ auth, only, wrap, controlPool, hashPin, normalisePhone, getT
     if (target.role === 'owner') return res.status(403).json({ error: 'The owner account cannot be edited here' });
 
     const sets = [], vals = [];
+    // `|| null` here was a real bug: for the `active` boolean it turns a
+    // deliberate `false` (deactivating someone) into `null`, which the NOT
+    // NULL constraint on that column then rejects outright — the
+    // "Faolsizlantirish" button has been failing in production. Coercing only
+    // an empty string (which a blanked date input sends) is what was actually
+    // needed, for `birthdate`.
     for (const k of ['name', 'craft', 'active', 'title', 'responsibility', 'email',
                      'work_mode', 'birthdate', 'avatar_color'])
-      if (k in req.body) { sets.push(`${k}=$${sets.length + 1}`); vals.push(req.body[k] || null); }
+      if (k in req.body) { sets.push(`${k}=$${sets.length + 1}`); vals.push(req.body[k] === '' ? null : req.body[k]); }
     if ('role' in req.body) {
       if (!['accountant', 'editor', 'teammate'].includes(req.body.role))
         return res.status(400).json({ error: 'Cannot change to that role here' });
