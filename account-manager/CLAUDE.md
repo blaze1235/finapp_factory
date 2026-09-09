@@ -5,6 +5,26 @@ the short list of things that break **silently**, with no error and no failing
 page, and are only caught by the test suite or by a client seeing something
 they should not have.
 
+## How to contribute
+
+You push as **yourself** — no shared credentials exist for this repo. Sign in
+once with `gh auth login`, then:
+
+```bash
+git checkout -b your-change
+# ... work, and run the suite (below) ...
+git push -u origin your-change
+gh pr create --fill
+```
+
+**Do not push straight to `main`.** The repo is private on a free plan, where
+GitHub cannot enforce that for us — so it is a convention rather than a lock,
+and it depends on you. CI still runs on every push and every pull request, so a
+break shows up immediately either way; check it before merging.
+
+Deployment is not automatic: production is released separately, from a local
+`railway up`. Merging to `main` does not ship anything to the live agency.
+
 ## Run the tests. Always.
 
 ```bash
@@ -14,7 +34,7 @@ DATABASE_URL=postgres://localhost:5432/am_control PORT=3111 npm start   # in one
 DATABASE_URL=postgres://localhost:5432/am_control BASE=http://localhost:3111 npm test
 ```
 
-**158 checks.** They drive real HTTP against a throwaway agency and then drop
+**166 checks.** They drive real HTTP against a throwaway agency and then drop
 it. The last section re-proves every visibility boundary **with the routes
 bypassed entirely**, querying the database directly as each role — so the
 routes could all be wrong and it would still have to hold. If you change a
