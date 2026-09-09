@@ -1,0 +1,4 @@
+[submodule "account-manager"]
+	path = account-manager
+	url = https://github.com/blaze1235/account-manager.git
+	branch = main
