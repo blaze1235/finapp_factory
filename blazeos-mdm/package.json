@@ -1,0 +1,10 @@
+{
+  "name": "blazeos-mdm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "BlazeOS MDM — multi-tenant device-financing platform (Railway deploy root)",
+  "scripts": {
+    "build": "npm --prefix web run build && npm --prefix server run build && npm --prefix server run prisma:generate",
+    "start": "npm --prefix server run start:prod"
+  }
+}

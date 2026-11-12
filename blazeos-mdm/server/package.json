@@ -11,7 +11,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",
     "seed": "tsx prisma/seed.ts",
-    "evaluate-overdue": "tsx src/jobs/evaluateOverdue.ts"
+    "evaluate-overdue": "node dist/jobs/evaluateOverdue.js",
+    "deploy": "prisma db push --skip-generate --accept-data-loss && node dist/bootstrap.js",
+    "start:prod": "npm run deploy && node dist/index.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -20,6 +22,7 @@
     "dotenv": "^16.6.1",
     "express": "^4.21.1",
     "jsonwebtoken": "^9.0.2",
+    "prisma": "^5.22.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -28,7 +31,6 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.9.0",
-    "prisma": "^5.22.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

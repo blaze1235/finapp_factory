@@ -1,5 +1,8 @@
 import express from "express";
 import cors from "cors";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { config } from "./config.js";
 import { requireAuth } from "./auth.js";
 import { errorMiddleware } from "./lib/http.js";
@@ -32,6 +35,17 @@ app.use("/api/contracts", requireAuth, contractsRouter);
 app.use("/api/payments", requireAuth, paymentsRouter);
 app.use("/api/dashboard", requireAuth, dashboardRouter);
 app.use("/api/billing", requireAuth, billingRouter);
+
+// In production, serve the built React app from the same origin as the API.
+// WEB_DIST overrides the default (web/dist relative to the compiled server).
+const here = dirname(fileURLToPath(import.meta.url));
+const webDist = process.env.WEB_DIST ?? join(here, "..", "..", "web", "dist");
+if (existsSync(join(webDist, "index.html"))) {
+  app.use(express.static(webDist));
+  // SPA fallback: non-API routes return index.html so client routing works.
+  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(join(webDist, "index.html")));
+  console.log(`Serving web build from ${webDist}`);
+}
 
 app.use(errorMiddleware);
 

@@ -64,6 +64,32 @@ Demo logins (from the seed):
    automatically. The final payment marks the contract paid off.
 5. Every lock/unlock/enroll/remove is written to `lock_events` for audit.
 
+## Deploy (Railway)
+
+Deployed as a **single service** (the Express server serves both the API and
+the built React app) plus a **PostgreSQL** plugin. Config lives in
+`nixpacks.toml` + the root `package.json`.
+
+- Build: installs `server` + `web`, builds both, generates the Prisma client.
+- Start (`server` `start:prod`): `prisma db push` applies the schema, then
+  `bootstrap` seeds demo data **only if the database is empty** (safe on every
+  redeploy — it never wipes data), then the server starts.
+
+Required env vars on the service:
+- `DATABASE_URL` — provided by the Railway Postgres plugin (reference it).
+- `JWT_SECRET` — a long random string.
+- `MDM_PROVIDER=mock`, `NOTIFY_PROVIDER=mock` until Phase 1.
+
+From the `blazeos-mdm/` directory, after `railway login`:
+
+```bash
+railway init        # create the project
+railway add         # add a PostgreSQL database
+railway up          # build + deploy this directory
+```
+
+Then set `JWT_SECRET` and reference `DATABASE_URL`, and generate a domain.
+
 ## Going to production (Phase 1)
 
 1. Register BlazeOS as a business + get a D-U-N-S number.
