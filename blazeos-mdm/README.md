@@ -67,10 +67,12 @@ Demo logins (from the seed):
 ## Deploy (Railway)
 
 Deployed as a **single service** (the Express server serves both the API and
-the built React app) plus a **PostgreSQL** plugin. Config lives in
-`nixpacks.toml` + the root `package.json`.
+the built React app) plus a **PostgreSQL** plugin. Build is driven by the
+`Dockerfile` + the root `package.json`.
 
-- Build: installs `server` + `web`, builds both, generates the Prisma client.
+- Build (`Dockerfile`): installs `server` + `web` (incl. dev deps), builds the
+  web app, generates the Prisma client, then compiles the server. The Prisma
+  client is generated **before** the server's `tsc` so its types resolve.
 - Start (`server` `start:prod`): `prisma db push` applies the schema, then
   `bootstrap` seeds demo data **only if the database is empty** (safe on every
   redeploy — it never wipes data), then the server starts.
@@ -83,12 +85,15 @@ Required env vars on the service:
 From the `blazeos-mdm/` directory, after `railway login`:
 
 ```bash
-railway init        # create the project
-railway add         # add a PostgreSQL database
-railway up          # build + deploy this directory
+railway init --name blazeos-mdm       # create the project
+railway add --database postgres       # add a PostgreSQL database
+railway add --service blazeos-app     # create the app service
+railway service blazeos-app           # link it
+# JWT_SECRET, DATABASE_URL (reference the Postgres plugin), MDM_PROVIDER=mock,
+# NOTIFY_PROVIDER=mock, NODE_ENV=production on the app service, then:
+railway up --service blazeos-app      # build (Dockerfile) + deploy
+railway domain --service blazeos-app --port 4000
 ```
-
-Then set `JWT_SECRET` and reference `DATABASE_URL`, and generate a domain.
 
 ## Going to production (Phase 1)
 

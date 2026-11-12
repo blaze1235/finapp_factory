@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "BlazeOS MDM — multi-tenant device-financing platform (Railway deploy root)",
   "scripts": {
-    "build": "npm --prefix web run build && npm --prefix server run build && npm --prefix server run prisma:generate",
+    "build": "npm --prefix web run build && npm --prefix server run prisma:generate && npm --prefix server run build",
     "start": "npm --prefix server run start:prod"
   }
 }
