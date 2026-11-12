@@ -17,4 +17,7 @@ export const config = {
   },
   // How many days past a due date before the system auto-locks.
   overdueGraceDays: Number(process.env.OVERDUE_GRACE_DAYS ?? 3),
+  // Notifications: "mock" logs to console; "telegram" sends via the Bot API.
+  notifyProvider: (process.env.NOTIFY_PROVIDER ?? "mock") as "mock" | "telegram",
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
 };

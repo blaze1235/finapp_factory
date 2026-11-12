@@ -82,7 +82,9 @@ model Store {
   name        String
   contactName String?
   contactPhone String?
+  telegramChatId String? // store owner's Telegram chat for alerts
   billingPlan BillingPlan @default(PER_DEVICE_MONTH)
+  monthlyFeeAmount Decimal @default(15000) @db.Decimal(14, 2) // what BlazeOS charges this store per enrolled device per month
   status      StoreStatus @default(ACTIVE)
   createdAt   DateTime    @default(now())
 
@@ -115,6 +117,7 @@ model Buyer {
   fullName      String
   idNumber      String // passport / national ID
   phone         String
+  telegramChatId String? // buyer's Telegram chat for lock/unlock alerts
   guarantorInfo Json? // { name, phone, idNumber } — optional
   createdAt     DateTime @default(now())
 

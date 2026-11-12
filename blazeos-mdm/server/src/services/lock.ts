@@ -1,7 +1,37 @@
 import type { Device, LockAction, TriggeredBy } from "@prisma/client";
 import { prisma } from "../db.js";
 import { mdm } from "../mdm/index.js";
+import { notifySafe } from "../notify/index.js";
 import { NotFoundError } from "../lib/http.js";
+
+// Send lock/unlock alerts to the buyer and the store owner.
+async function notifyParties(deviceId: string, event: "LOCK" | "UNLOCK") {
+  const device = await prisma.device.findUnique({
+    where: { id: deviceId },
+    include: { buyer: true, store: true },
+  });
+  if (!device) return;
+  const name = device.model ?? "your iPhone";
+  const buyerText =
+    event === "LOCK"
+      ? `🔒 ${name} has been locked for a missed payment. Please contact ${device.store.name} to make a payment and restore your device.`
+      : `✅ Payment received. ${name} has been unlocked.`;
+  const storeText =
+    event === "LOCK"
+      ? `🔒 Device locked (overdue): ${name} · ${device.buyer?.fullName ?? "buyer"} (${device.imei}).`
+      : `✅ Device unlocked (paid): ${name} · ${device.buyer?.fullName ?? "buyer"} (${device.imei}).`;
+
+  if (device.buyer) {
+    notifySafe(
+      { telegramChatId: device.buyer.telegramChatId, label: `buyer ${device.buyer.fullName}` },
+      buyerText
+    );
+  }
+  notifySafe(
+    { telegramChatId: device.store.telegramChatId, label: `store ${device.store.name}` },
+    storeText
+  );
+}
 
 interface ActorContext {
   triggeredBy: TriggeredBy;
@@ -51,6 +81,7 @@ export async function lockDevice(deviceId: string, message: string, ctx: ActorCo
     data: { lockState: "LOCKED" },
   });
   await record(deviceId, device.storeId, "LOCK", ctx);
+  await notifyParties(deviceId, "LOCK");
   return updated;
 }
 
@@ -63,6 +94,7 @@ export async function unlockDevice(deviceId: string, ctx: ActorContext) {
     data: { lockState: "UNLOCKED" },
   });
   await record(deviceId, device.storeId, "UNLOCK", ctx);
+  await notifyParties(deviceId, "UNLOCK");
   return updated;
 }
 

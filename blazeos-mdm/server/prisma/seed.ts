@@ -42,7 +42,13 @@ async function main() {
 
   // --- Store 1: Tashkent Mobile ---
   const store1 = await prisma.store.create({
-    data: { name: "Tashkent Mobile", contactName: "Jahongir", contactPhone: "+998901112233" },
+    data: {
+      name: "Tashkent Mobile",
+      contactName: "Jahongir",
+      contactPhone: "+998901112233",
+      telegramChatId: "100000001",
+      monthlyFeeAmount: 15000,
+    },
   });
   await prisma.user.create({
     data: {
@@ -65,7 +71,13 @@ async function main() {
 
   // --- Store 2: Samarqand Phones ---
   const store2 = await prisma.store.create({
-    data: { name: "Samarqand Phones", contactName: "Dilshod", contactPhone: "+998933334455" },
+    data: {
+      name: "Samarqand Phones",
+      contactName: "Dilshod",
+      contactPhone: "+998933334455",
+      telegramChatId: "100000002",
+      monthlyFeeAmount: 18000,
+    },
   });
   await prisma.user.create({
     data: {
@@ -83,6 +95,7 @@ async function main() {
     buyerName: string;
     idNumber: string;
     phone: string;
+    telegramChatId?: string;
     imei: string;
     model: string;
     total: number;
@@ -98,6 +111,7 @@ async function main() {
         fullName: opts.buyerName,
         idNumber: opts.idNumber,
         phone: opts.phone,
+        telegramChatId: opts.telegramChatId,
       },
     });
     const device = await prisma.device.create({
@@ -165,6 +179,7 @@ async function main() {
     buyerName: "Oybek Karimov",
     idNumber: "AA1234567",
     phone: "+998901234567",
+    telegramChatId: "200000001",
     imei: "356789101112131",
     model: "iPhone 14",
     total: 12000000,
@@ -181,6 +196,7 @@ async function main() {
     buyerName: "Sardor Tashmatov",
     idNumber: "AA7654321",
     phone: "+998907654321",
+    telegramChatId: "200000002",
     imei: "356789101112132",
     model: "iPhone 13",
     total: 9000000,

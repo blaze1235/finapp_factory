@@ -10,13 +10,17 @@ import { devicesRouter } from "./routes/devices.js";
 import { contractsRouter } from "./routes/contracts.js";
 import { paymentsRouter } from "./routes/payments.js";
 import { dashboardRouter } from "./routes/dashboard.js";
+import { billingRouter } from "./routes/billing.js";
 import { mdm } from "./mdm/index.js";
+import { notifier } from "./notify/index.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/health", (_req, res) => res.json({ ok: true, mdm: mdm().name }));
+app.get("/health", (_req, res) =>
+  res.json({ ok: true, mdm: mdm().name, notify: notifier().name })
+);
 
 app.use("/api/auth", authRouter);
 
@@ -27,6 +31,7 @@ app.use("/api/devices", requireAuth, devicesRouter);
 app.use("/api/contracts", requireAuth, contractsRouter);
 app.use("/api/payments", requireAuth, paymentsRouter);
 app.use("/api/dashboard", requireAuth, dashboardRouter);
+app.use("/api/billing", requireAuth, billingRouter);
 
 app.use(errorMiddleware);
 

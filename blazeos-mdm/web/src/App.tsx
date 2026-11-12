@@ -6,6 +6,7 @@ import {
   FileText,
   Wallet,
   Store,
+  Receipt,
   LogOut,
   ShieldCheck,
 } from "lucide-react";
@@ -16,6 +17,7 @@ import { Devices } from "./pages/Devices";
 import { Buyers } from "./pages/Buyers";
 import { Contracts } from "./pages/Contracts";
 import { Payments } from "./pages/Payments";
+import { Billing } from "./pages/Billing";
 import { Stores } from "./pages/Stores";
 
 export function App() {
@@ -37,6 +39,7 @@ export function App() {
             <Route path="/buyers" element={<Buyers />} />
             <Route path="/contracts" element={<Contracts />} />
             <Route path="/payments" element={<Payments />} />
+            <Route path="/billing" element={<Billing />} />
             {user.role === "MAIN_ADMIN" && <Route path="/stores" element={<Stores />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -54,6 +57,7 @@ function Sidebar() {
     { to: "/buyers", label: "Buyers", icon: Users },
     { to: "/contracts", label: "Contracts", icon: FileText },
     { to: "/payments", label: "Payments", icon: Wallet },
+    { to: "/billing", label: "Billing", icon: Receipt },
     ...(user?.role === "MAIN_ADMIN" ? [{ to: "/stores", label: "Stores", icon: Store }] : []),
   ];
 
