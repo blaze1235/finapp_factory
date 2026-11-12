@@ -1,0 +1,224 @@
+// BlazeOS MDM — multi-tenant device-financing platform
+// One BlazeOS-owned ABM org + MDM server; stores are tenants scoped by storeId.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MAIN_ADMIN // BlazeOS — full platform
+  STORE_ADMIN // a partner store — their devices only, can lock/unlock
+  STORE_STAFF // a partner store clerk — enroll + record payments, no lock/unlock
+}
+
+enum StoreStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum BillingPlan {
+  PER_DEVICE_MONTH
+  PER_EVENT
+}
+
+enum EnrollmentStatus {
+  PENDING // created, not yet enrolled on the phone
+  ENROLLED // supervised + MDM profile active
+  REMOVED // released from ABM / unenrolled (e.g. after payoff)
+}
+
+enum LockState {
+  UNLOCKED
+  LOCKED // Lost Mode / device locked
+  RESTRICTED // partial restriction (kiosk / apps disabled)
+}
+
+enum ContractStatus {
+  ACTIVE
+  PAID_OFF
+  DEFAULTED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  DUE
+  PAID
+  OVERDUE
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  OTHER
+}
+
+enum LockAction {
+  LOCK
+  UNLOCK
+  RESTRICT
+  ENROLL
+  REMOVE
+}
+
+enum TriggeredBy {
+  SYSTEM // automated (overdue job / payment webhook)
+  USER // a store admin or main admin acted manually
+}
+
+enum ChargeType {
+  PER_DEVICE_MONTH
+  PER_EVENT
+  SETUP_FEE
+}
+
+model Store {
+  id          String      @id @default(cuid())
+  name        String
+  contactName String?
+  contactPhone String?
+  telegramChatId String? // store owner's Telegram chat for alerts
+  billingPlan BillingPlan @default(PER_DEVICE_MONTH)
+  monthlyFeeAmount Decimal @default(15000) @db.Decimal(14, 2) // what BlazeOS charges this store per enrolled device per month
+  status      StoreStatus @default(ACTIVE)
+  createdAt   DateTime    @default(now())
+
+  users          User[]
+  buyers         Buyer[]
+  devices        Device[]
+  contracts      Contract[]
+  payments       Payment[]
+  lockEvents     LockEvent[]
+  billingCharges BillingCharge[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  storeId      String? // null for MAIN_ADMIN
+  role         Role
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  store      Store?      @relation(fields: [storeId], references: [id])
+  lockEvents LockEvent[]
+}
+
+model Buyer {
+  id            String   @id @default(cuid())
+  storeId       String
+  fullName      String
+  idNumber      String // passport / national ID
+  phone         String
+  telegramChatId String? // buyer's Telegram chat for lock/unlock alerts
+  guarantorInfo Json? // { name, phone, idNumber } — optional
+  createdAt     DateTime @default(now())
+
+  store     Store      @relation(fields: [storeId], references: [id])
+  devices   Device[]
+  contracts Contract[]
+
+  @@index([storeId])
+}
+
+model Device {
+  id               String           @id @default(cuid())
+  storeId          String
+  buyerId          String?
+  imei             String           @unique
+  serial           String?          @unique
+  model            String? // e.g. "iPhone 14 Pro"
+  abmDeviceId      String? // Apple Business Manager device id
+  mdmProfileLocked Boolean          @default(false) // "Allow MDM profile removal" = No
+  enrollmentStatus EnrollmentStatus @default(PENDING)
+  lockState        LockState        @default(UNLOCKED)
+  supervisedAt     DateTime?
+  createdAt        DateTime         @default(now())
+
+  store      Store       @relation(fields: [storeId], references: [id])
+  buyer      Buyer?      @relation(fields: [buyerId], references: [id])
+  contract   Contract?
+  lockEvents LockEvent[]
+
+  @@index([storeId])
+  @@index([buyerId])
+}
+
+model Contract {
+  id           String         @id @default(cuid())
+  storeId      String
+  deviceId     String         @unique
+  buyerId      String
+  totalPrice   Decimal        @db.Decimal(14, 2)
+  downPayment  Decimal        @default(0) @db.Decimal(14, 2)
+  termMonths   Int
+  monthlyAmount Decimal       @db.Decimal(14, 2)
+  startDate    DateTime
+  status       ContractStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now())
+
+  store    Store     @relation(fields: [storeId], references: [id])
+  device   Device    @relation(fields: [deviceId], references: [id])
+  buyer    Buyer     @relation(fields: [buyerId], references: [id])
+  payments Payment[]
+
+  @@index([storeId])
+}
+
+model Payment {
+  id         String        @id @default(cuid())
+  contractId String
+  storeId    String
+  amount     Decimal       @db.Decimal(14, 2)
+  dueDate    DateTime
+  paidDate   DateTime?
+  method     PaymentMethod?
+  status     PaymentStatus @default(DUE)
+  createdAt  DateTime      @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id])
+  store    Store    @relation(fields: [storeId], references: [id])
+
+  @@index([contractId])
+  @@index([storeId])
+  @@index([status])
+}
+
+model LockEvent {
+  id          String      @id @default(cuid())
+  storeId     String
+  deviceId    String
+  triggeredBy TriggeredBy
+  userId      String? // set when triggeredBy = USER
+  action      LockAction
+  reason      String?
+  createdAt   DateTime    @default(now())
+
+  store  Store  @relation(fields: [storeId], references: [id])
+  device Device @relation(fields: [deviceId], references: [id])
+  user   User?  @relation(fields: [userId], references: [id])
+
+  @@index([storeId])
+  @@index([deviceId])
+}
+
+model BillingCharge {
+  id         String     @id @default(cuid())
+  storeId    String
+  deviceId   String?
+  chargeType ChargeType
+  amount     Decimal    @db.Decimal(14, 2)
+  period     String? // e.g. "2026-11"
+  createdAt  DateTime   @default(now())
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+}
