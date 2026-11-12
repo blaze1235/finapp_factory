@@ -25,6 +25,8 @@ const createStoreSchema = z.object({
   name: z.string().min(1),
   contactName: z.string().optional(),
   contactPhone: z.string().optional(),
+  telegramChatId: z.string().optional(),
+  monthlyFeeAmount: z.number().min(0).optional(),
   billingPlan: z.enum(["PER_DEVICE_MONTH", "PER_EVENT"]).default("PER_DEVICE_MONTH"),
   // Optional: create the store's first admin in the same call.
   adminName: z.string().optional(),
@@ -41,7 +43,9 @@ storesRouter.post(
         name: body.name,
         contactName: body.contactName,
         contactPhone: body.contactPhone,
+        telegramChatId: body.telegramChatId,
         billingPlan: body.billingPlan,
+        ...(body.monthlyFeeAmount !== undefined ? { monthlyFeeAmount: body.monthlyFeeAmount } : {}),
       },
     });
 

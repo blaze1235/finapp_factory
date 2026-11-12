@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
-import { Card } from "../ui";
+import { Plus } from "lucide-react";
+import { api, ApiError } from "../api";
+import { useAuth } from "../auth";
+import { useStores } from "../useStores";
+import { Button, Card, Field, FormError, Modal, SelectInput, TextInput } from "../ui";
 
 interface Buyer {
   id: string;
@@ -12,15 +15,40 @@ interface Buyer {
 }
 
 export function Buyers() {
+  const { user } = useAuth();
   const [buyers, setBuyers] = useState<Buyer[]>([]);
+  const [adding, setAdding] = useState(false);
+
+  async function load() {
+    setBuyers(await api.get<Buyer[]>("/buyers"));
+  }
   useEffect(() => {
-    api.get<Buyer[]>("/buyers").then(setBuyers);
+    load();
   }, []);
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold">Buyers</h1>
-      <p className="mb-6 text-sm text-slate-500">People financing a device through a partner store.</p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Buyers</h1>
+          <p className="text-sm text-slate-500">People financing a device through a partner store.</p>
+        </div>
+        <Button onClick={() => setAdding(true)}>
+          <Plus size={16} /> Add buyer
+        </Button>
+      </div>
+
+      {adding && (
+        <AddBuyer
+          isMain={user?.role === "MAIN_ADMIN"}
+          onClose={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            load();
+          }}
+        />
+      )}
+
       <Card>
         <table className="w-full text-sm">
           <thead>
@@ -53,5 +81,90 @@ export function Buyers() {
         </table>
       </Card>
     </div>
+  );
+}
+
+function AddBuyer({
+  isMain,
+  onClose,
+  onSaved,
+}: {
+  isMain: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const stores = useStores();
+  const [form, setForm] = useState({
+    storeId: "",
+    fullName: "",
+    idNumber: "",
+    phone: "",
+    telegramChatId: "",
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function set(k: keyof typeof form, v: string) {
+    setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api.post("/buyers", {
+        ...(isMain ? { storeId: form.storeId } : {}),
+        fullName: form.fullName,
+        idNumber: form.idNumber,
+        phone: form.phone,
+        telegramChatId: form.telegramChatId || undefined,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Add buyer" onClose={onClose}>
+      <form onSubmit={submit}>
+        <FormError message={error} />
+        {isMain && (
+          <Field label="Store">
+            <SelectInput value={form.storeId} onChange={(e) => set("storeId", e.target.value)} required>
+              <option value="">Select a store…</option>
+              {stores.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+        )}
+        <Field label="Full name">
+          <TextInput value={form.fullName} onChange={(e) => set("fullName", e.target.value)} required />
+        </Field>
+        <Field label="ID / passport number">
+          <TextInput value={form.idNumber} onChange={(e) => set("idNumber", e.target.value)} required />
+        </Field>
+        <Field label="Phone">
+          <TextInput value={form.phone} onChange={(e) => set("phone", e.target.value)} required />
+        </Field>
+        <Field label="Telegram chat ID" hint="Optional — for lock/unlock alerts.">
+          <TextInput value={form.telegramChatId} onChange={(e) => set("telegramChatId", e.target.value)} />
+        </Field>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? "Saving…" : "Add buyer"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

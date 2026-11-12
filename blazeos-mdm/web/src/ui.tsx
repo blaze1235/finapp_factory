@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
@@ -80,4 +80,66 @@ export function Button({
 export function money(v: string | number): string {
   const n = typeof v === "string" ? Number(v) : v;
   return new Intl.NumberFormat("en-US").format(n) + " so'm";
+}
+
+export function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-16"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-slate-100 px-5 py-4">
+          <h2 className="text-lg font-semibold">{title}</h2>
+        </div>
+        <div className="p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+const fieldLabel = "block text-sm font-medium text-slate-700";
+const fieldInput =
+  "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand";
+
+export function Field({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: string;
+}) {
+  return (
+    <label className="mb-3 block">
+      <span className={fieldLabel}>{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-xs text-slate-400">{hint}</span>}
+    </label>
+  );
+}
+
+export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={fieldInput} />;
+}
+
+export function SelectInput(props: SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select {...props} className={fieldInput} />;
+}
+
+export function FormError({ message }: { message: string | null }) {
+  if (!message) return null;
+  return <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{message}</div>;
 }
